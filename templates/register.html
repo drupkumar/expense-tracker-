@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Create account{% endblock %}
+{% block auth %}
+<section class="auth-wrap">
+  <div class="auth-story">
+    <div class="brand light">
+      <span class="logo">A</span>
+      <span><strong>Aureum</strong><small>Begin a cleaner money habit</small></span>
+    </div>
+    <h1>A ledger that feels like a product, not a spreadsheet.</h1>
+    <p>Built for students and working professionals who want clarity without banking integrations.</p>
+  </div>
+  <div class="auth-card">
+    <h2>Create your space</h2>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    <form method="post" class="stack">
+      <label>Full name
+        <input name="name" required placeholder="Drup Kumar">
+      </label>
+      <label>Email
+        <input type="email" name="email" required>
+      </label>
+      <label>Password
+        <input type="password" name="password" minlength="6" required placeholder="At least 6 characters">
+      </label>
+      <button class="btn-primary" type="submit">Start tracking</button>
+    </form>
+    <p class="muted center">Already have an account? <a href="{{ url_for('login') }}">Sign in</a></p>
+  </div>
+</section>
+{% endblock %}

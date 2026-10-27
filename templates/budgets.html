@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Budgets{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">{{ month }}</p>
+    <h1>Spend with a ceiling, not a guess.</h1>
+  </div>
+</header>
+
+<section class="split">
+  <article class="glass">
+    <h3>Create or update a category budget</h3>
+    <form method="post" class="stack">
+      <label>Category
+        <select name="category_id">
+          {% for c in categories %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Monthly limit (₹)
+        <input type="number" min="1" step="1" name="amount" required>
+      </label>
+      <button class="btn-primary" type="submit">Save budget</button>
+    </form>
+  </article>
+  <article class="glass">
+    <h3>This month’s limits</h3>
+    {% for row in rows %}
+    <div class="budget-card">
+      <div class="between">
+        <strong>{{ row.budget.category.name }}</strong>
+        <form method="post" action="{{ url_for('delete_budget', budget_id=row.budget.id) }}">
+          <button class="icon-btn danger" type="submit"><i class="bi bi-x"></i></button>
+        </form>
+      </div>
+      <div class="between">
+        <span>{{ money(row.spent) }} spent</span>
+        <span>{{ money(row.budget.amount) }} limit</span>
+      </div>
+      <div class="bar tall"><span class="{{ 'over' if row.pct >= 100 else '' }}" style="width:{{ row.pct }}%; background:{{ row.budget.category.color }}"></span></div>
+      <small class="{{ 'down' if row.pct >= 100 else 'muted' }}">{{ '%.0f'|format(row.pct) }}% used</small>
+    </div>
+    {% else %}
+    <p class="muted">No budgets yet. Give Food, Travel or Shopping a monthly ceiling.</p>
+    {% endfor %}
+  </article>
+</section>
+{% endblock %}

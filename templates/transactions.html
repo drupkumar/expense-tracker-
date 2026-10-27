@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Transactions{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Ledger</p>
+    <h1>Every rupee, accounted for.</h1>
+  </div>
+  <button class="btn-primary" data-bs-toggle="modal" data-bs-target="#addModal" onclick="focusAmount()"><i class="bi bi-plus-lg"></i> Add transaction</button>
+</header>
+
+<form class="filters glass" method="get">
+  <input name="q" value="{{ filters.q }}" placeholder="Search merchant or note">
+  <select name="kind">
+    <option value="">All types</option>
+    <option value="expense" {{ 'selected' if filters.kind == 'expense' }}>Expense</option>
+    <option value="income" {{ 'selected' if filters.kind == 'income' }}>Income</option>
+  </select>
+  <select name="category">
+    <option value="">All categories</option>
+    {% for c in categories %}
+    <option value="{{ c.id }}" {{ 'selected' if filters.category == c.id|string }}>{{ c.name }}</option>
+    {% endfor %}
+  </select>
+  <input type="date" name="start" value="{{ filters.start }}">
+  <input type="date" name="end" value="{{ filters.end }}">
+  <button class="btn-ghost" type="submit">Filter</button>
+</form>
+
+<article class="glass table-wrap">
+  <table class="data">
+    <thead>
+      <tr><th>Date</th><th>Details</th><th>Category</th><th>Method</th><th>Amount</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for t in rows %}
+      <tr>
+        <td>{{ t.txn_date.strftime('%d %b %Y') }}</td>
+        <td>
+          <strong>{{ t.merchant or t.note or '—' }}</strong>
+          <small>{{ t.note if t.merchant else t.source }}</small>
+        </td>
+        <td><span class="pill" style="--c:{{ t.category.color }}">{{ t.category.name }}</span></td>
+        <td>{{ t.payment_method }}</td>
+        <td class="{{ 'up' if t.kind == 'income' else 'down' }}">{{ '+' if t.kind == 'income' else '−' }}{{ money(t.amount) }}</td>
+        <td class="actions">
+          <button class="icon-btn" data-bs-toggle="modal" data-bs-target="#edit-{{ t.id }}"><i class="bi bi-pencil"></i></button>
+          <form method="post" action="{{ url_for('delete_transaction', txn_id=t.id) }}" onsubmit="return confirm('Delete this transaction?')">
+            <button class="icon-btn danger" type="submit"><i class="bi bi-trash"></i></button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No matching transactions.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</article>
+
+<div class="modal fade" id="addModal" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content glass-modal stack" method="post" action="{{ url_for('create_transaction') }}" id="addForm">
+      <h3>New transaction</h3>
+      {% include "partials/txn_form.html" %}
+      <button class="btn-primary" type="submit">Save</button>
+    </form>
+  </div>
+</div>
+
+{% for t in rows %}
+<div class="modal fade" id="edit-{{ t.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content glass-modal stack" method="post" action="{{ url_for('edit_transaction', txn_id=t.id) }}" class="edit-form">
+      <h3>Edit transaction</h3>
+      {% set txn = t %}
+      {% include "partials/txn_form.html" %}
+      <button class="btn-primary" type="submit">Update</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+function focusAmount() {
+  setTimeout(() => {
+    const amountInput = document.querySelector('#addModal input[name="amount"]');
+    if (amountInput) amountInput.focus();
+  }, 500);
+}
+
+function filterCategories(kindSelect, categorySelect) {
+  const kind = kindSelect.value;
+  const options = categorySelect.querySelectorAll('option');
+  options.forEach(opt => {
+    const optKind = opt.getAttribute('data-kind');
+    if (optKind === kind) {
+      opt.style.display = '';
+    } else {
+      opt.style.display = 'none';
+    }
+  });
+  if (categorySelect.value && categorySelect.options[categorySelect.selectedIndex].style.display === 'none') {
+    categorySelect.value = '';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  const addForm = document.getElementById('addForm');
+  if (addForm) {
+    const kindSelect = addForm.querySelector('#kindSelect');
+    const categorySelect = addForm.querySelector('#categorySelect');
+    if (kindSelect && categorySelect) {
+      kindSelect.addEventListener('change', () => filterCategories(kindSelect, categorySelect));
+      filterCategories(kindSelect, categorySelect);
+    }
+    addForm.addEventListener('submit', function(e) {
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addModal'));
+      if (modal) modal.hide();
+    });
+  }
+
+  document.querySelectorAll('.edit-form').forEach(form => {
+    const kindSelect = form.querySelector('#kindSelect');
+    const categorySelect = form.querySelector('#categorySelect');
+    if (kindSelect && categorySelect) {
+      kindSelect.addEventListener('change', () => filterCategories(kindSelect, categorySelect));
+      filterCategories(kindSelect, categorySelect);
+    }
+    form.addEventListener('submit', function(e) {
+      const modalId = this.closest('.modal').id;
+      const modal = bootstrap.Modal.getInstance(document.getElementById(modalId));
+      if (modal) modal.hide();
+    });
+  });
+});
+</script>
+{% endblock %}

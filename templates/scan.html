@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Scan bill{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Vision ledger</p>
+    <h1>Photograph a bill. Aureum writes the transaction.</h1>
+    <p class="lede">Works with paper receipts, GPay / PhonePe / Paytm screenshots, and online order invoices.</p>
+  </div>
+</header>
+
+<section class="scan-grid">
+  <article class="glass scan-drop" id="dropzone">
+    <input type="file" id="fileInput" accept="image/*">
+    <div class="camera-frame" id="previewWrap">
+      <img id="preview" alt="Receipt preview">
+      <video id="camera" autoplay playsinline></video>
+      <div class="scan-empty" id="emptyState">
+        <i class="bi bi-receipt-cutoff"></i>
+        <h3>Drop a photo, upload, or use the camera</h3>
+        <p>Tip: crop tightly around the total and merchant name for cleaner reads.</p>
+      </div>
+    </div>
+    <div class="scan-actions">
+      <button class="btn-primary" type="button" id="pickBtn"><i class="bi bi-image"></i> Choose photo</button>
+      <button class="btn-ghost" type="button" id="camBtn"><i class="bi bi-camera"></i> Open camera</button>
+      <button class="btn-ghost" type="button" id="snapBtn" hidden><i class="bi bi-record-circle"></i> Capture</button>
+    </div>
+    <div class="progress-line" id="ocrProgress" hidden>
+      <span id="ocrBar"></span>
+    </div>
+    <p class="muted" id="ocrStatus">Waiting for a receipt…</p>
+    <p class="muted">Need a test bill? Use the sample <a href="{{ url_for('static', filename='uploads/receipts/sample-phonepe.png') }}" download>PhonePe screenshot</a>.</p>
+  </article>
+
+  <article class="glass">
+    <div class="card-head">
+      <h3>Detected details</h3>
+      <span class="chip" id="confidenceChip">Ready</span>
+    </div>
+    <form class="stack" method="post" action="{{ url_for('create_transaction') }}" id="confirmForm">
+      <input type="hidden" name="source" value="scan">
+      <input type="hidden" name="receipt_path" id="receiptPath">
+      <input type="hidden" name="next" value="dashboard">
+      <label>Amount (₹)
+        <input type="number" step="0.01" min="0.01" name="amount" id="fAmount" required>
+      </label>
+      <label>Merchant
+        <input name="merchant" id="fMerchant">
+      </label>
+      <label>Category
+        <select name="category_id" id="fCategory" required>
+          {% for c in categories %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="two">
+        <label>Date
+          <input type="date" name="txn_date" id="fDate" value="{{ today }}" required>
+        </label>
+        <label>Payment
+          <select name="payment_method" id="fPay">
+            <option>UPI</option>
+            <option>Card</option>
+            <option>Cash</option>
+            <option>Net Banking</option>
+            <option>Wallet</option>
+          </select>
+        </label>
+      </div>
+      <label>Note
+        <input name="note" id="fNote" placeholder="Imported from receipt">
+      </label>
+      <input type="hidden" name="kind" value="expense">
+      <button class="btn-primary" type="submit" id="saveBtn" disabled>Add to tracker</button>
+    </form>
+    <details class="raw">
+      <summary>Raw text from the photo</summary>
+      <pre id="rawText">Nothing scanned yet.</pre>
+    </details>
+  </article>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="{{ url_for('static', filename='js/scan.js') }}"></script>
+{% endblock %}

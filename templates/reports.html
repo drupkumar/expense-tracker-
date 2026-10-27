@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Financial analysis</p>
+    <h1>Monthly and yearly stories, not just totals.</h1>
+  </div>
+  <a class="btn-ghost" href="{{ url_for('export_csv') }}"><i class="bi bi-download"></i> Export CSV</a>
+</header>
+
+<form class="filters glass" method="get">
+  <select name="year">
+    {% for y in years %}
+    <option value="{{ y }}" {{ 'selected' if y == year }}>{{ y }}</option>
+    {% endfor %}
+  </select>
+  <select name="month">
+    <option value="">Whole year</option>
+    {% for i, label in [(1,'January'),(2,'February'),(3,'March'),(4,'April'),(5,'May'),(6,'June'),(7,'July'),(8,'August'),(9,'September'),(10,'October'),(11,'November'),(12,'December')] %}
+    <option value="{{ i }}" {{ 'selected' if month == i|string }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn-ghost" type="submit">Refresh</button>
+</form>
+
+<section class="kpi-grid">
+  <article class="glass kpi mint"><span>Income</span><strong>{{ money(income) }}</strong></article>
+  <article class="glass kpi warn"><span>Expense</span><strong>{{ money(expense) }}</strong></article>
+  <article class="glass kpi gold"><span>Net</span><strong>{{ money(net) }}</strong></article>
+</section>
+
+<section class="split">
+  <article class="glass">
+    <h3>Yearly cashflow</h3>
+    <canvas id="yearChart" height="150"></canvas>
+  </article>
+  <article class="glass">
+    <h3>Category mix</h3>
+    <canvas id="mixChart" height="150"></canvas>
+  </article>
+</section>
+
+<section class="split">
+  <article class="glass">
+    <h3>Payment methods</h3>
+    <ul class="stat-list">
+      {% for method, amount in by_method.items() %}
+      <li><span>{{ method }}</span><b>{{ money(amount) }}</b></li>
+      {% else %}
+      <li class="muted">No expenses in this period.</li>
+      {% endfor %}
+    </ul>
+  </article>
+  <article class="glass">
+    <h3>Category totals</h3>
+    <ul class="stat-list">
+      {% for cat, amount in by_cat.items() %}
+      <li><span>{{ cat }}</span><b>{{ money(amount) }}</b></li>
+      {% else %}
+      <li class="muted">Scan or add expenses to populate this report.</li>
+      {% endfor %}
+    </ul>
+  </article>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.AUREUM_REPORTS = {
+    months: {{ monthly | map(attribute='label') | list | tojson }},
+    income: {{ monthly | map(attribute='income') | list | tojson }},
+    expense: {{ monthly | map(attribute='expense') | list | tojson }},
+    cats: {{ by_cat.keys() | list | tojson }},
+    catVals: {{ by_cat.values() | list | tojson }}
+  };
+</script>
+{% endblock %}

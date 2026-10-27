@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block auth %}
+<section class="auth-wrap">
+  <div class="auth-story">
+    <div class="brand light">
+      <span class="logo">A</span>
+      <span>
+        <strong>Aureum</strong>
+        <small>Smart Personal Expense Tracker</small>
+      </span>
+    </div>
+    <h1>Money, made visible.</h1>
+    <p>Record income, photograph receipts, set budgets, and watch spending patterns turn into calm decisions.</p>
+    <ul class="story-points">
+      <li><i class="bi bi-camera-fill"></i> Snap a bill or UPI screenshot — Aureum fills the transaction.</li>
+      <li><i class="bi bi-graph-up-arrow"></i> Monthly and yearly charts that actually explain your month.</li>
+      <li><i class="bi bi-shield-check"></i> Your ledger stays on your machine. No bank login required.</li>
+    </ul>
+  </div>
+  <div class="auth-card">
+    <h2>Welcome back</h2>
+    <p class="muted">Sign in to your personal ledger.</p>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    <form method="post" class="stack">
+      <label>Email
+        <input type="email" name="email" required placeholder="you@college.edu">
+      </label>
+      <label>Password
+        <input type="password" name="password" required>
+      </label>
+      <button class="btn-primary" type="submit">Enter Aureum</button>
+    </form>
+    <a class="btn-ghost" href="{{ url_for('demo') }}">Try the live demo</a>
+    <p class="muted center">New here? <a href="{{ url_for('register') }}">Create an account</a></p>
+  </div>
+</section>
+{% endblock %}

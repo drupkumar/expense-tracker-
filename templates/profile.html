@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Profile{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Account</p>
+    <h1>Your details stay local, yours, and editable.</h1>
+  </div>
+</header>
+<article class="glass slim">
+  <form method="post" class="stack">
+    <label>Name
+      <input name="name" value="{{ user.name }}" required>
+    </label>
+    <label>Email
+      <input value="{{ user.email }}" disabled>
+    </label>
+    <label>Phone
+      <input name="phone" value="{{ user.phone }}">
+    </label>
+    <label>Typical monthly income (₹)
+      <input type="number" min="0" name="monthly_income" value="{{ user.monthly_income }}">
+    </label>
+    <label>New password
+      <input type="password" name="password" placeholder="Leave blank to keep current">
+    </label>
+    <button class="btn-primary" type="submit">Save profile</button>
+  </form>
+</article>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Goals{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Future you</p>
+    <h1>Name the thing you’re saving toward.</h1>
+  </div>
+</header>
+
+<section class="split">
+  <article class="glass">
+    <h3>New savings goal</h3>
+    <form method="post" class="stack">
+      <label>Goal name
+        <input name="name" required placeholder="Emergency fund, Goa trip, new laptop">
+      </label>
+      <div class="two">
+        <label>Target (₹)
+          <input type="number" min="1" name="target_amount" required>
+        </label>
+        <label>Already saved (₹)
+          <input type="number" min="0" name="saved_amount" value="0">
+        </label>
+      </div>
+      <label>Deadline
+        <input type="date" name="deadline">
+      </label>
+      <button class="btn-primary" type="submit">Create goal</button>
+    </form>
+  </article>
+  <div class="goal-stack">
+    {% for g in items %}
+    {% set pct = (g.saved_amount / g.target_amount * 100) if g.target_amount else 0 %}
+    <article class="glass">
+      <div class="between">
+        <h3>{{ g.name }}</h3>
+        <form method="post" action="{{ url_for('delete_goal', goal_id=g.id) }}">
+          <button class="icon-btn danger" type="submit"><i class="bi bi-trash"></i></button>
+        </form>
+      </div>
+      <p class="muted">{{ money(g.saved_amount) }} of {{ money(g.target_amount) }}{% if g.deadline %} · by {{ g.deadline.strftime('%d %b %Y') }}{% endif %}</p>
+      <div class="bar tall"><span style="width:{{ [pct, 100] | min }}%"></span></div>
+      <form class="inline" method="post" action="{{ url_for('add_to_goal', goal_id=g.id) }}">
+        <input type="number" min="1" name="amount" placeholder="Add ₹" required>
+        <button class="btn-ghost" type="submit">Add savings</button>
+      </form>
+    </article>
+    {% else %}
+    <article class="glass"><p class="muted">No goals yet. Give leftover money a destination.</p></article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

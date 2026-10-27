@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">This month</p>
+    <h1>{{ current_user.name.split()[0] }}, here’s your month in motion.</h1>
+  </div>
+  <a class="btn-primary" href="{{ url_for('scan') }}"><i class="bi bi-camera"></i> Scan a bill</a>
+</header>
+
+<section class="kpi-grid">
+  <article class="glass kpi">
+    <span>Income</span>
+    <strong>{{ money(income) }}</strong>
+    <small>This calendar month</small>
+  </article>
+  <article class="glass kpi warn">
+    <span>Spent</span>
+    <strong>{{ money(expense) }}</strong>
+    <small>{% if delta > 0 %}+{{ '%.0f'|format(delta) }}% vs last month{% elif delta < 0 %}{{ '%.0f'|format(delta) }}% vs last month{% else %}Steady vs last month{% endif %}</small>
+  </article>
+  <article class="glass kpi mint">
+    <span>Left to use</span>
+    <strong>{{ money(balance) }}</strong>
+    <small>Income minus expenses</small>
+  </article>
+  <article class="glass kpi gold">
+    <span>Savings rate</span>
+    <strong>{{ '%.0f'|format(savings_rate) }}%</strong>
+    <small>Of this month’s income</small>
+  </article>
+</section>
+
+<section class="split">
+  <article class="glass">
+    <div class="card-head">
+      <h3>Cashflow</h3>
+      <span class="chip">Last 6 months</span>
+    </div>
+    <canvas id="trendChart" height="140"></canvas>
+  </article>
+  <article class="glass">
+    <div class="card-head">
+      <h3>Where it went</h3>
+      <span class="chip">Categories</span>
+    </div>
+    <canvas id="catChart" height="140"></canvas>
+  </article>
+</section>
+
+<section class="split thirds">
+  <article class="glass span-2">
+    <div class="card-head">
+      <h3>Recent activity</h3>
+      <a href="{{ url_for('transactions') }}">View all</a>
+    </div>
+    <div class="txn-list">
+      {% for t in recent %}
+      <div class="txn-row">
+        <span class="cat-dot" style="background:{{ t.category.color }}"></span>
+        <div>
+          <strong>{{ t.merchant or t.note or t.category.name }}</strong>
+          <small>{{ t.category.name }} · {{ t.txn_date.strftime('%d %b') }} · {{ t.payment_method }}</small>
+        </div>
+        <b class="{{ 'up' if t.kind == 'income' else 'down' }}">
+          {{ '+' if t.kind == 'income' else '−' }}{{ money(t.amount) }}
+        </b>
+      </div>
+      {% else %}
+      <p class="muted">No transactions yet. Scan a receipt or add one manually.</p>
+      {% endfor %}
+    </div>
+  </article>
+  <article class="glass">
+    <div class="card-head"><h3>Insights</h3></div>
+    <ul class="insight-list">
+      {% for insight in insights %}
+      <li>{{ insight }}</li>
+      {% endfor %}
+    </ul>
+    <div class="card-head tight"><h3>Budgets</h3></div>
+    {% for card in budget_cards %}
+    <div class="budget-mini">
+      <div class="between">
+        <span>{{ card.budget.category.name }}</span>
+        <small>{{ money(card.spent) }} / {{ money(card.budget.amount) }}</small>
+      </div>
+      <div class="bar"><span style="width:{{ card.pct }}%; background:{{ card.budget.category.color }}"></span></div>
+    </div>
+    {% else %}
+    <p class="muted">Set category budgets to get live alerts.</p>
+    {% endfor %}
+  </article>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.AUREUM_CHARTS = {
+    trendLabels: {{ trend_labels | tojson }},
+    trendIncome: {{ trend_income | tojson }},
+    trendExpense: {{ trend_expense | tojson }},
+    catLabels: {{ cat_labels | tojson }},
+    catColors: {{ cat_colors | tojson }},
+    catValues: {{ cat_values | tojson }}
+  };
+</script>
+{% endblock %}
