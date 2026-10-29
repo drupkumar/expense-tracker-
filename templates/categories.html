@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Categories{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Organization</p>
+    <h1>Customize your categories.</h1>
+  </div>
+</header>
+
+<section class="split">
+  <article class="glass">
+    <h3>Create custom category</h3>
+    <form method="post" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+      <label>Category name
+        <input name="name" required placeholder="e.g., Daily Coffee">
+      </label>
+      <label>Type
+        <select name="kind">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+      </label>
+      <label>Icon (Bootstrap icon class)
+        <input name="icon" value="bi-tag" placeholder="bi-tag, bi-cup-hot, bi-cart">
+      </label>
+      <label>Color
+        <input type="color" name="color" value="#3ee0b0">
+      </label>
+      <button class="btn-primary" type="submit">Create category</button>
+    </form>
+  </article>
+  <div class="goal-stack">
+    <h3>Your custom categories</h3>
+    {% for c in user_cats %}
+    <article class="glass">
+      <div class="between">
+        <div class="between">
+          <span class="pill" style="--c:{{ c.color }}">
+            <i class="bi {{ c.icon }}"></i> {{ c.name }}
+          </span>
+          <small class="muted">{{ c.kind }}</small>
+        </div>
+        <div>
+          <button class="icon-btn" data-bs-toggle="modal" data-bs-target="#edit-{{ c.id }}"><i class="bi bi-pencil"></i></button>
+          <form class="inline" method="post" action="{{ url_for('delete_category', cat_id=c.id) }}" onsubmit="return confirm('Delete this category?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <button class="icon-btn danger" type="submit"><i class="bi bi-trash"></i></button>
+          </form>
+        </div>
+      </div>
+    </article>
+    {% else %}
+    <article class="glass"><p class="muted">No custom categories yet. Create your own above.</p></article>
+    {% endfor %}
+
+    <h3 class="mt-4">Default categories</h3>
+    {% for c in default_cats %}
+    <article class="glass" style="opacity: 0.7;">
+      <div class="between">
+        <span class="pill" style="--c:{{ c.color }}">
+          <i class="bi {{ c.icon }}"></i> {{ c.name }}
+        </span>
+        <small class="muted">{{ c.kind }}</small>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+{% for c in user_cats %}
+<div class="modal fade" id="edit-{{ c.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content glass-modal stack" method="post" action="{{ url_for('edit_category', cat_id=c.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+      <h3>Edit category</h3>
+      <label>Category name
+        <input name="name" value="{{ c.name }}" required>
+      </label>
+      <label>Icon
+        <input name="icon" value="{{ c.icon }}">
+      </label>
+      <label>Color
+        <input type="color" name="color" value="{{ c.color }}">
+      </label>
+      <button class="btn-primary" type="submit">Update</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

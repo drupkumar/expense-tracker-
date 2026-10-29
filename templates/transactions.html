@@ -6,7 +6,7 @@
     <p class="eyebrow">Ledger</p>
     <h1>Every rupee, accounted for.</h1>
   </div>
-  <button class="btn-primary" data-bs-toggle="modal" data-bs-target="#addModal" onclick="focusAmount()"><i class="bi bi-plus-lg"></i> Add transaction</button>
+  <button class="btn-primary" data-bs-toggle="modal" data-bs-target="#addModal"><i class="bi bi-plus-lg"></i> Add transaction</button>
 </header>
 
 <form class="filters glass" method="get">
@@ -27,14 +27,34 @@
   <button class="btn-ghost" type="submit">Filter</button>
 </form>
 
-<article class="glass table-wrap">
+{% if rows %}
+<form class="glass table-wrap" method="post" action="{{ url_for('bulk_transaction_action') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <div class="between" style="margin-bottom: 12px;">
+    <strong>Bulk actions</strong>
+    <div class="inline">
+      <select name="action" id="bulkActionSelect">
+        <option value="">Select action</option>
+        <option value="delete">Delete selected</option>
+        <option value="change_category">Change category</option>
+      </select>
+      <select name="new_category_id" id="bulkCategorySelect" style="display:none;">
+        <option value="">Select category</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn-primary" type="submit">Apply</button>
+    </div>
+  </div>
   <table class="data">
     <thead>
-      <tr><th>Date</th><th>Details</th><th>Category</th><th>Method</th><th>Amount</th><th></th></tr>
+      <tr><th><input type="checkbox" id="selectAll"></th><th>Date</th><th>Details</th><th>Category</th><th>Method</th><th>Amount</th><th></th></tr>
     </thead>
     <tbody>
       {% for t in rows %}
       <tr>
+        <td><input type="checkbox" name="selected" value="{{ t.id }}" class="txn-checkbox"></td>
         <td>{{ t.txn_date.strftime('%d %b %Y') }}</td>
         <td>
           <strong>{{ t.merchant or t.note or '—' }}</strong>
@@ -46,20 +66,34 @@
         <td class="actions">
           <button class="icon-btn" data-bs-toggle="modal" data-bs-target="#edit-{{ t.id }}"><i class="bi bi-pencil"></i></button>
           <form method="post" action="{{ url_for('delete_transaction', txn_id=t.id) }}" onsubmit="return confirm('Delete this transaction?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <button class="icon-btn danger" type="submit"><i class="bi bi-trash"></i></button>
           </form>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="muted">No matching transactions.</td></tr>
+      <tr><td colspan="7" class="muted">No matching transactions.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+</form>
+{% else %}
+<article class="glass">
+  <table class="data">
+    <thead>
+      <tr><th>Date</th><th>Details</th><th>Category</th><th>Method</th><th>Amount</th><th></th></tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="6" class="muted">No matching transactions.</td></tr>
+    </tbody>
+  </table>
 </article>
+{% endif %}
 
 <div class="modal fade" id="addModal" tabindex="-1">
   <div class="modal-dialog">
-    <form class="modal-content glass-modal stack" method="post" action="{{ url_for('create_transaction') }}" id="addForm">
+    <form class="modal-content glass-modal stack" method="post" action="{{ url_for('create_transaction') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
       <h3>New transaction</h3>
       {% include "partials/txn_form.html" %}
       <button class="btn-primary" type="submit">Save</button>
@@ -70,7 +104,8 @@
 {% for t in rows %}
 <div class="modal fade" id="edit-{{ t.id }}" tabindex="-1">
   <div class="modal-dialog">
-    <form class="modal-content glass-modal stack" method="post" action="{{ url_for('edit_transaction', txn_id=t.id) }}" class="edit-form">
+    <form class="modal-content glass-modal stack" method="post" action="{{ url_for('edit_transaction', txn_id=t.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
       <h3>Edit transaction</h3>
       {% set txn = t %}
       {% include "partials/txn_form.html" %}
@@ -79,59 +114,26 @@
   </div>
 </div>
 {% endfor %}
-
+{% endblock %}
+{% block scripts %}
 <script>
-function focusAmount() {
-  setTimeout(() => {
-    const amountInput = document.querySelector('#addModal input[name="amount"]');
-    if (amountInput) amountInput.focus();
-  }, 500);
-}
-
-function filterCategories(kindSelect, categorySelect) {
-  const kind = kindSelect.value;
-  const options = categorySelect.querySelectorAll('option');
-  options.forEach(opt => {
-    const optKind = opt.getAttribute('data-kind');
-    if (optKind === kind) {
-      opt.style.display = '';
-    } else {
-      opt.style.display = 'none';
-    }
-  });
-  if (categorySelect.value && categorySelect.options[categorySelect.selectedIndex].style.display === 'none') {
-    categorySelect.value = '';
-  }
-}
-
 document.addEventListener('DOMContentLoaded', function() {
-  const addForm = document.getElementById('addForm');
-  if (addForm) {
-    const kindSelect = addForm.querySelector('#kindSelect');
-    const categorySelect = addForm.querySelector('#categorySelect');
-    if (kindSelect && categorySelect) {
-      kindSelect.addEventListener('change', () => filterCategories(kindSelect, categorySelect));
-      filterCategories(kindSelect, categorySelect);
-    }
-    addForm.addEventListener('submit', function(e) {
-      const modal = bootstrap.Modal.getInstance(document.getElementById('addModal'));
-      if (modal) modal.hide();
+  const selectAll = document.getElementById('selectAll');
+  const checkboxes = document.querySelectorAll('.txn-checkbox');
+  const actionSelect = document.getElementById('bulkActionSelect');
+  const categorySelect = document.getElementById('bulkCategorySelect');
+
+  if (selectAll && checkboxes.length) {
+    selectAll.addEventListener('change', function() {
+      checkboxes.forEach(cb => cb.checked = this.checked);
     });
   }
 
-  document.querySelectorAll('.edit-form').forEach(form => {
-    const kindSelect = form.querySelector('#kindSelect');
-    const categorySelect = form.querySelector('#categorySelect');
-    if (kindSelect && categorySelect) {
-      kindSelect.addEventListener('change', () => filterCategories(kindSelect, categorySelect));
-      filterCategories(kindSelect, categorySelect);
-    }
-    form.addEventListener('submit', function(e) {
-      const modalId = this.closest('.modal').id;
-      const modal = bootstrap.Modal.getInstance(document.getElementById(modalId));
-      if (modal) modal.hide();
+  if (actionSelect && categorySelect) {
+    actionSelect.addEventListener('change', function() {
+      categorySelect.style.display = this.value === 'change_category' ? 'inline-block' : 'none';
     });
-  });
+  }
 });
 </script>
 {% endblock %}

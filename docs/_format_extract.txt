@@ -1,0 +1,325 @@
+SCHEME OF TEACHING AND EXAMINATION 
+BACHELOR OF COMPUTER APPLICATIONS
+
+I V SEMESTER
+
+S. 
+No. Subject Code Title  Teaching Hrs/Week Examination Theory Practical Duration Marks IA Dissertation/viva Total1 24BCAPJProject - 03      03 30120150
+V semester Project Work (24BCAPJ) 
+
+General Rules 
+
+1. Students are encouraged and appreciated to show their project code demo along with their power point slide show during their viva-voce exams as an added advantage. 
+Guidelines for the Preparation of Project Reports
+
+1. Printing Area: The margins should be: Left: 1.25", Right: 1.00", Top and Bottom1.00". The text should be justified to occupy the full line width, so that the right margin is not ragged, with words hyphenated as appropriate. Please fill pages so that the length of the text runs to the right margin.  
+
+2. Abstract: The abstract should summarize the contents of the report and should contain at least 150 and at most 350 words. It should be set in 12-point font size. There should be two blank (10-point) lines before and after the title ABSTRACT.  
+
+3. Layout, Typeface, Font Sizes, and Numbering: For the main text, please use 12-point type and 1.5 line spacing. We recommend using Times New Roman fonts. Italic type may be used to emphasize words in running text. Bold type and underlining should be avoided.  
+
+4. Headings. 
+The chapter headings should be in capitals and must be separated from the other text by 24point line space. 
+
+Headings should be in the form where each word is capitalized (i.e., nouns, verbs, and all other words except articles, prepositions, and conjunctions should be set with an initial capital) and should, with the exception of the title, be aligned to the left. The font sizes are given in Table 1.  
+
+Here are some examples of headings: "Criteria to Disprove Context-Freeness of Collage Languages", "On Correcting the Intrusion of Tracing Non-deterministic Programs by 
+Software", "A User-Friendly and Extendable Data Distribution System", "Multi-flip Networks: Parallelizing GenSAT", "Self-determinations of Man". 
+
+
+Table 1 Font sizes of headings. Table captions should always be positioned Above the tables. The final sentence of a table caption should end without a period 
+Heading Example  Font Size and Style Title Chapter 1 
+Introduction 16 Point Bold First Level 
+Heading 1.1. Preamble 
+14 Point Bold Second Level Heading 2.3.1. Mandatory or Regulatory Signs 12 Point Bold Third Level 
+Heading Stop and Give away signs 12 Point Bold  Fourth Level 
+Heading Creation of database 12 	Point 	Bold 
+Italicized 
+
+Figures and Photographs 
+Check that in line drawings, lines are not interrupted and have constant width. Grids and details within the figures must be clearly readable and may not be written one on top of the other. The lettering in figures should have a height of 2 mm (10-point type). Figures should be scaled up or down accordingly.  
+Figures should be numbered and should have a caption which should always be positioned under the figures, in contrast to the caption belonging to a table, which should always appear above the table. Please center the captions between the margins and set them in 9-point type (Fig. 1 shows an example). The distance between text and figure should be about 12 point spacing, the distance between figure and caption about 6 point spacing. 
+
+	Fig 1.1. The last sentence of a figure caption should generally end without a 	period. 
+
+
+6. Formulas 
+Displayed equations or formulas are centered and set on a separate line (with an extra line or halfline space above and below). Displayed expressions should be numbered for reference. The numbers should be consecutive within each section or within the contribution, with numbers enclosed in parentheses and set on the right margin. For example, A correlation matrix  is computed using equation (5), 
+Here,  and  are the feature vectors of query examples  and  and    is the dimension of feature . 
+
+7. Footnotes/ Header 
+Footnotes/Header should appear at the bottom of the normal text area, with a line of about 5 cm in Word set immediately below/above the text. 
+
+Header sample: (Project title is left aligned and page number is right aligned) 
+
+	<<Project Title>>		                               <<Page Number>>
+
+
+Sample Footer: 
+
+
+Department of computer science, Seshadripuram college, Bengaluru-20
+
+
+8. The list of references is headed "References" and is assigned a number with square brackets in the decimal system of headings. The list should be set in small print and placed at the end of the dissertation, in front of the appendix, if any exists. Please do not insert a page break before the list of references if the page is not completely filled. An example is given at the end of this information sheet. For citations in the text please use square brackets and consecutive numbers: [1], [2], [3] etc. 
+9. Page Numbering 
+Reports must be printed with page numbers on the top right corner. 
+10. The total number of reports to be prepared are two 
+• One copy for College 
+• One copy to candidate 
+• One CD's having soft copy of Project and project report (for department purpose) 
+11. Before taking the final printout, the approval of the concerned guide is mandatory and suggested corrections, if any, must be incorporated.  
+12. Every copy of the report must contain (See formats towards the end of this document) 
+• Outer title page (blue) with a plastic cover  
+• Inner title page (White) 
+• Certificate in the format enclosed, only certificate will be signed by following: 
+o Principal 
+o HOD 
+o Internal guide and External guide 
+13. The organization of the report should be as follows 
+O Inner title page 
+O Certificate 
+O Declaration (by student) 
+O Acknowledgement 
+O Abstract 
+O Table of Contents 
+O List of table and figures 
+O Main body of project    
+    Proper attention is to be paid to the technical contents as well as to the organization of the report and clarity of the expression. Care should be taken to avoid spelling and typing errors. The student should note that report (write-up) forms the important component in the overall evaluation of the project. 
+
+Sample content (more suitable for Application oriented projects) is attached and number of pages may be 50-70 which can be modified as per guide's instructions depending on the project under development. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CONTENTS (For Application oriented Projects) 
+1. INTRODUCTION    			  
+1.1 PROJECT DESCRIPTION (2-4 pages)					  
+2. LITERATURE SURVEY 
+2.1 EXISTING AND PROPOSED SYSTEM (2-3 pages)			 
+2.2 FEASIBILITY STUDY 				(2-3 pages)		 
+2.3 TOOLS AND TECHNOLOGIES USED (2-4 pages)				   
+2.4 HARDWARE AND SOFTWARE REQUIREMENTS (1 page)		  
+3. SOFTWARE REQUIREMENTS SPECIFICATION 				
+3.1 USERS 				(2-3 pages)				  
+3.2 FUNCTIONAL REQUIREMENTS (2-3 pages)				 
+3.3 NON-FUNCTIONAL REQUIREMENTS (2-3 pages)				  
+4. SYSTEM DESIGN (High level or Architectural design) 			 
+4.1 SYSTEM PERSPECTIVE  	(1-2 pages)				 
+4.2 CONTEXT DIAGRAM                     (1-2 pages)       
+
+ 5.   DETAILED DESIGN (various design diagrams according to project)  
+	5.1	USE CASE DIAGRAM 							  
+	5.2	SEQUENCE DIAGRAMS  					  
+	5.3	COLLABARATION DIAGRAMS				  
+	5.4	ACTIVITY DIAGRAM 							  
+     5.5       DATABASE DESIGN (ER and/or Conceptual schema)(3-4 pages)	  6.IMPLEMENTATION	   
+	6.1	SCREEN SHOTS
+	        6.2       CODING					 
+7. SOFTWARE TESTING (Test cases etc.)(6- 8 pages)			  
+8. CONCLUSION                                        (1 page)			  
+9. FUTURE ENHANCEMENTS                     (1 page)			 
+
+Appendix A BIBLIOGRAPHY    (1 page)      
+Appendix B USER MANUAL    (2-10 pages)     
+
+
+
+
+ (COVER PAGE) 
+
+PROJECT TITLE 
+
+A project report submitted in partial fulfillment of the requirements for the award of degree of 
+
+BACHELOR OF COMPUTER APPLICATIONS  
+of 
+Dr. Manmohan Singh Bengaluru City University
+
+
+
+
+By 
+
+STUDENT NAME 
+(USN Number) 
+
+
+
+Under the Guidance of  
+
+(INTERNAL GUIDE NAME contact guide for details)
+
+
+
+
+
+SESHADRIPURAM COLLEGE
+27, Nagappa Street, Seshadripuram, Bengaluru-560 020 Affiliated to Dr. Manmohan Singh Bengaluru City University ISO 9001:2015 Certified Recognized Under Section 2(f) and 12(B)
+of the University Grants Commission Act, 1956 
+AICTE Approved NAAC Grade: A++
+Website: www.spmcollege.ac.in  www.pg.spmcollege.ac.in
+  
+
+
+  2026-27
+(Inner Title Page) 
+PROJECT TITLE 
+
+A project report submitted in partial fulfillment of the requirements for the award of degree of 
+
+BACHELOR OF COMPUTER APPLICATIONS  
+of 
+Dr. Manmohan Singh Bengaluru City University
+
+
+
+
+By 
+
+STUDENT NAME 
+(USN Number) 
+
+
+
+Under the Guidance of  
+
+(INTERNAL GUIDE NAME contact guide for details)
+
+
+
+
+
+
+SESHADRIPURAM COLLEGE
+27, Nagappa Street, Seshadripuram, Bengaluru-560 020 Affiliated to Dr. Manmohan Singh Bengaluru City University ISO 9001:2015 Certified Recognized Under Section 2(f) and 12(B)
+of the University Grants Commission Act, 1956
+AICTE Approved NAAC Grade: A++
+Website: www.spmcollege.ac.in  www.pg.spmcollege.ac.in
+     
+
+2026-27
+
+(Certificate-1) 
+
+SESHADRIPURAM COLLEGE
+27, Nagappa Street, Seshadripuram, Bengaluru-560 020 Affiliated to Dr. Manmohan Singh Bengaluru City University ISO 9001:2015 Certified Recognized Under Section 2(f) and 12(B)
+of the University Grants Commission Act, 1956
+AICTE Approved NAAC Grade: A++
+Website: www.spmcollege.ac.in  www.pg.spmcollege.ac.in
+
+
+
+
+CERTIFICATE
+
+      This is to Certify that <Student Name> bearing <Reg No> has completed her final semester project work entitled <"******"> as a partial fulfillment for the award of Bachelor of Computer Applications degree, during the academic year 2026-27 under my supervision. 
+     
+     
+      
+
+					                     				     	                                               								
+
+
+Signature of Internal Guide  				                                 Signature of HOD                        
+*Guide Name*    			  					    Rajeshwari V		         	
+
+
+
+
+
+
+External Examiner:........................................            Internal Examiner:.........................................
+	
+
+DECLARATION
+
+
+I, <Name of student>, student of 6th semester BCA, <College Name>, bearing USN <USN of student>hereby declare that the project entitled <Project Title> has been carried out by me under the supervision of Internal Guide <Name of the Guide>, <Designation of Guide> and submitted in partial fulfillment of the requirements for the award of the Degree of Bachelor of Computer Applications by the Dr. Manmohan Singh Bengaluru City University during the academic year 2026-27. This report has not been submitted to any other Organization/University for any award of degree or certificate.  
+
+
+
+Name:  
+
+      Signature: 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ACKNOWLEDGEMENT
+
+
+I take this opportunity to first express my heartfelt gratitude to God for providing me with the strength, wisdom, and perseverance to successfully complete my internship and this report.
+I would also like to sincerely thank my parents for their constant support, encouragement, and belief in me throughout this journey. Their guidance and motivation have been a strong foundation for my achievements.
+First and foremost, I am extremely thankful to Maj Dr. Anandappa I, Principal, Seshadripuram College, for providing me with the platform and encouragement to take up this internship as part of my academic curriculum.
+I extend my heartfelt thanks to Prof. Rajeswari V, Head of the Department of Computer Science, for her constant support, motivation, and for facilitating a smooth academic environment.
+I would also like to express my deep appreciation to my internship guide XXXXXX, Assistant Professor, for their invaluable guidance, continuous feedback, and encouragement throughout the course of the internship. Their insights and support played a crucial role in successfully completing this experience.
+Lastly, I thank all faculty members of the Department of Computer Science and my peers for their cooperation, suggestions, and encouragement.
+
+                                                                                                                             XXXXXX
+(U18GH24S0XX
+
+
+
+
+
+
+
+
+
+ABSTRACT
+101
+
+
+1
+
+
+101
+
+

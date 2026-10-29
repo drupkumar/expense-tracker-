@@ -6,7 +6,7 @@
     <p class="eyebrow">Financial analysis</p>
     <h1>Monthly and yearly stories, not just totals.</h1>
   </div>
-  <a class="btn-ghost" href="{{ url_for('export_csv') }}"><i class="bi bi-download"></i> Export CSV</a>
+  <div class="report-actions"><a class="btn-ghost" href="{{ url_for('export_csv') }}">CSV</a><a class="btn-ghost" href="{{ url_for('export_xlsx') }}">Excel</a><a class="btn-ghost" href="{{ url_for('export_pdf', year=year, month=month if month else None) }}">PDF</a><a class="btn-ghost" href="{{ url_for('printable_report') }}" target="_blank">Print</a><a class="btn-ghost" href="{{ url_for('import_csv') }}">Import CSV</a></div>
 </header>
 
 <form class="filters glass" method="get">
@@ -29,6 +29,18 @@
   <article class="glass kpi warn"><span>Expense</span><strong>{{ money(expense) }}</strong></article>
   <article class="glass kpi gold"><span>Net</span><strong>{{ money(net) }}</strong></article>
 </section>
+<section class="split">
+  <article class="glass">
+    <h3>Month comparison{% if month %} · {{ month }} vs previous{% else %} · Choose a month above{% endif %}</h3>
+    {% if comparison %}<ul class="stat-list">{% for name, previous, current, difference, percent in comparison %}<li><span>{{ name }} · {{ money(previous) }} → {{ money(current) }}</span><b class="{{ 'down' if difference > 0 else 'up' }}">{{ '↑' if difference > 0 else '↓' }} {{ money(difference|abs) }} ({{ '%.0f'|format(percent|abs) }}%)</b></li>{% endfor %}</ul>{% else %}<p class="muted">Select a month to compare it with the previous month.</p>{% endif %}
+  </article>
+  <article class="glass"><h3>Spending outlook</h3><p class="muted">Estimated total this month from daily pace and recent monthly trend.</p><strong>{{ money(forecast) }}</strong><p>Financial health score: <strong>{{ health_score }}/100</strong></p><ul>{% for tip in health_tips %}<li>{{ tip }}</li>{% endfor %}</ul></article>
+</section>
+<section class="split">
+  <article class="glass"><h3>Top merchants</h3><canvas id="merchantChart" height="190"></canvas>{% if not top_merchants %}<p class="muted">No merchant data yet.</p>{% endif %}</article>
+  <article class="glass"><h3>Weekday spending</h3><div class="weekday-heatmap">{% for label, amount in [('Mon',weekdays[0]),('Tue',weekdays[1]),('Wed',weekdays[2]),('Thu',weekdays[3]),('Fri',weekdays[4]),('Sat',weekdays[5]),('Sun',weekdays[6])] %}<div class="weekday-cell" style="--heat:{{ (amount / (weekdays|max or 1))|round(2) }}"><strong>{{ label }}</strong><small>{{ money(amount) }}</small></div>{% endfor %}</div><p class="muted">Higher intensity indicates more spending on that weekday.</p></article>
+</section>
+{% if anomalies %}<article class="glass"><h3>Unusually large transactions</h3><ul class="stat-list">{% for t in anomalies %}<li><span>{{ t.txn_date }} · {{ t.merchant or t.category.name }}</span><b>{{ money(t.amount) }}</b></li>{% endfor %}</ul></article>{% endif %}
 
 <section class="split">
   <article class="glass">
@@ -70,8 +82,11 @@
     months: {{ monthly | map(attribute='label') | list | tojson }},
     income: {{ monthly | map(attribute='income') | list | tojson }},
     expense: {{ monthly | map(attribute='expense') | list | tojson }},
+    forecast: {{ forecast | tojson }},
     cats: {{ by_cat.keys() | list | tojson }},
-    catVals: {{ by_cat.values() | list | tojson }}
+    catVals: {{ by_cat.values() | list | tojson }},
+    merchantLabels: {{ top_merchant_labels | tojson }},
+    merchantValues: {{ top_merchant_values | tojson }}
   };
 </script>
 {% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Transfers{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">Liquidity</p>
+    <h1>Move money between payment methods.</h1>
+  </div>
+</header>
+
+<section class="split">
+  <article class="glass">
+    <h3>New transfer</h3>
+    <form method="post" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+      <div class="two">
+        <label>From
+          <select name="from_method">
+            {% for m in default_methods %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>To
+          <select name="to_method">
+            {% for m in default_methods %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Amount (₹)
+        <input type="number" min="0.01" step="0.01" name="amount" required>
+      </label>
+      <label>Date
+        <input type="date" name="txn_date" value="{{ today }}">
+      </label>
+      <label>Note
+        <input name="note" placeholder="Wallet recharge, Bank withdrawal">
+      </label>
+      <button class="btn-primary" type="submit">Record transfer</button>
+    </form>
+  </article>
+  <div class="goal-stack">
+    <h3>Payment method balances</h3>
+    {% if balances %}
+    {% for method, balance in balances.items() %}
+    <article class="glass">
+      <div class="between">
+        <strong>{{ method }}</strong>
+        <strong class="{{ 'up' if balance > 0 else 'down' }}">{{ money(balance) }}</strong>
+      </div>
+      <small class="muted">{{ 'Net positive' if balance > 0 else 'Net negative' }}</small>
+    </article>
+    {% endfor %}
+    {% else %}
+    <article class="glass"><p class="muted">No transfers recorded yet. Balances will appear here.</p></article>
+    {% endif %}
+
+    <h3 class="mt-4">Recent transfers</h3>
+    {% for t in transfers %}
+    <article class="glass">
+      <div class="between">
+        <div>
+          <strong>{{ t.from_method }} → {{ t.to_method }}</strong>
+          <small>{{ t.txn_date.strftime('%d %b %Y') }}</small>
+        </div>
+        <div>
+          <strong>{{ money(t.amount) }}</strong>
+          <form class="inline" method="post" action="{{ url_for('delete_transfer', transfer_id=t.id) }}" onsubmit="return confirm('Delete this transfer?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <button class="icon-btn danger" type="submit"><i class="bi bi-trash"></i></button>
+          </form>
+        </div>
+      </div>
+      {% if t.note %}
+      <small class="muted">{{ t.note }}</small>
+      {% endif %}
+    </article>
+    {% else %}
+    <article class="glass"><p class="muted">No transfers yet.</p></article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

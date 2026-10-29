@@ -89,7 +89,7 @@ async function uploadReceipt(file) {
   const body = new FormData();
   body.append("receipt", file);
   try {
-    const res = await fetch("/scan/upload", { method: "POST", body });
+    const res = await fetch("/scan/upload", { method: "POST", body, headers: { "X-CSRFToken": document.querySelector('meta[name="csrf-token"]')?.content || "" } });
     const data = await res.json();
     if (data.path) document.getElementById("receiptPath").value = data.path;
   } catch {
@@ -100,7 +100,7 @@ async function uploadReceipt(file) {
 async function fillFromServer(text) {
   const res = await fetch("/scan/parse", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-CSRFToken": document.querySelector('meta[name="csrf-token"]')?.content || "" },
     body: JSON.stringify({ text }),
   });
   const data = await res.json();
@@ -110,8 +110,11 @@ async function fillFromServer(text) {
   document.getElementById("fNote").value = data.note || "";
   document.getElementById("fPay").value = data.payment_method || "UPI";
   if (data.category_id) document.getElementById("fCategory").value = data.category_id;
-  document.getElementById("confidenceChip").textContent = data.amount ? "Fields filled" : "Check manually";
-  ocrStatus.textContent = data.amount
+  const confidence = Number(data.confidence || 0);
+  document.getElementById("confidenceChip").textContent = confidence >= 0.8 ? "High confidence" : confidence >= 0.55 ? "Check details" : "Low confidence";
+  ocrStatus.textContent = data.amount && confidence < 0.55
+    ? "Low confidence. Confirm the amount, merchant, and date before saving."
+    : data.amount
     ? `Found ₹${data.amount} at ${data.merchant}. Confirm and save.`
     : "Text captured, but amount was unclear. Fill the amount and save.";
   saveBtn.disabled = false;

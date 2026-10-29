@@ -27,6 +27,7 @@
       {% endfor %}
     {% endwith %}
     <form method="post" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
       <label>Email
         <input type="email" name="email" required placeholder="you@college.edu">
       </label>
@@ -35,6 +36,7 @@
       </label>
       <button class="btn-primary" type="submit">Enter Aureum</button>
     </form>
+    <p class="muted center"><a href="{{ url_for('forgot_password') }}">Forgot password?</a></p>
     <a class="btn-ghost" href="{{ url_for('demo') }}">Try the live demo</a>
     <p class="muted center">New here? <a href="{{ url_for('register') }}">Create an account</a></p>
   </div>

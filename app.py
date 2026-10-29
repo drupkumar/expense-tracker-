@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import math
 import os
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from functools import wraps
@@ -18,12 +21,14 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import extract, func, or_
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect
+from sqlalchemy import extract, func, or_, text
 from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.utils import secure_filename
 
 from config import Config
-from models import Budget, Category, Goal, Transaction, User, db
+from models import Budget, Category, Goal, ImportBatch, RecurringTransaction, Transaction, Transfer, User, db
 from parser import parse_receipt_text
 
 ALLOWED_RECEIPTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -47,27 +52,102 @@ DEFAULT_CATEGORIES = [
 ]
 
 
-def create_app() -> Flask:
+def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
+    if test_config:
+        app.config.update(test_config)
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
     db.init_app(app)
 
+    csrf = CSRFProtect(app)
+    limiter = Limiter(get_remote_address, app=app, default_limits=[])
+    # Keep the limiter alive because its route decorators use a weak reference.
+    app.extensions["aureum_limiter"] = limiter
+
     with app.app_context():
         db.create_all()
+        migrate_database()
         seed_categories()
+        process_recurring_transactions()
 
-    register_routes(app)
+    register_routes(app, csrf, limiter)
     return app
 
 
 def seed_categories() -> None:
-    if Category.query.count():
+    if Category.query.filter_by(user_id=None).count():
         return
     for name, kind, icon, color in DEFAULT_CATEGORIES:
-        db.session.add(Category(name=name, kind=kind, icon=icon, color=color))
+        db.session.add(Category(user_id=None, name=name, kind=kind, icon=icon, color=color))
     db.session.commit()
+
+
+def migrate_database() -> None:
+    """Apply small additive migrations so existing SQLite installs keep working."""
+    from sqlalchemy import inspect
+    inspector = inspect(db.engine)
+    additions = {
+        "user": {
+            "reset_token": "VARCHAR(100) DEFAULT ''",
+            "reset_token_expires": "DATETIME NULL",
+            "theme": "VARCHAR(10) DEFAULT 'dark'",
+        },
+        "category": {"user_id": "INTEGER NULL"},
+    }
+    with db.engine.begin() as connection:
+        for table, columns in additions.items():
+            present = {column["name"] for column in inspector.get_columns(table)}
+            for name, definition in columns.items():
+                if name not in present:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
+    # db.create_all() above creates new tables for existing databases.
+
+
+def process_recurring_transactions() -> None:
+    today = date.today()
+    due_recurring = RecurringTransaction.query.filter(
+        RecurringTransaction.is_active.is_(True), RecurringTransaction.next_due_date <= today
+    ).all()
+    for rec in due_recurring:
+        while rec.next_due_date <= today:
+            db.session.add(Transaction(
+                user_id=rec.user_id, category_id=rec.category_id, amount=rec.amount,
+                kind=rec.kind, note=f"{rec.note} (recurring)" if rec.note else "Recurring transaction",
+                merchant=rec.merchant, payment_method=rec.payment_method,
+                txn_date=rec.next_due_date, source="recurring",
+            ))
+            rec.next_due_date = advance_due_date(rec.next_due_date, rec.frequency)
+    if due_recurring:
+        db.session.commit()
+
+
+def advance_due_date(due: date, frequency: str) -> date:
+    if frequency == "daily":
+        return due + timedelta(days=1)
+    if frequency == "weekly":
+        return due + timedelta(weeks=1)
+    if frequency == "monthly":
+        year = due.year + (due.month == 12)
+        month = 1 if due.month == 12 else due.month + 1
+        return date(year, month, min(due.day, month_bounds(year, month)[1].day))
+    year = due.year + 1
+    return date(year, due.month, min(due.day, month_bounds(year, due.month)[1].day))
+
+
+def valid_user_category(category_id: int, user_id: int, kind: str | None = None) -> bool:
+    query = Category.query.filter(
+        Category.id == category_id,
+        (Category.user_id.is_(None) | (Category.user_id == user_id)),
+    )
+    if kind:
+        query = query.filter(Category.kind == kind)
+    return query.first() is not None
+
+
+def valid_color(value: str) -> bool:
+    return bool(re.fullmatch(r"#[0-9a-fA-F]{6}", value or ""))
 
 
 def login_required(view):
@@ -99,17 +179,60 @@ def month_bounds(year: int, month: int) -> tuple[date, date]:
     return start, end
 
 
-def category_map() -> dict[str, Category]:
-    return {c.name.lower(): c for c in Category.query.all()}
+def format_money(user: User | None, value: float) -> str:
+    currency = user.currency if user else "INR"
+    symbols = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£"}
+    symbol = symbols.get(currency, currency + " ")
+    number = float(value)
+    return f"{symbol}{number:,.0f}" if number.is_integer() else f"{symbol}{number:,.2f}"
 
 
-def register_routes(app: Flask) -> None:
+def linear_regression(values: list[float]) -> tuple[float, float]:
+    if len(values) < 2:
+        return 0, 0
+    n = len(values)
+    x = list(range(n))
+    sum_x = sum(x)
+    sum_y = sum(values)
+    sum_xy = sum(xi * yi for xi, yi in zip(x, values))
+    sum_x2 = sum(xi * xi for xi in x)
+    denominator = n * sum_x2 - sum_x * sum_x
+    if denominator == 0:
+        return 0, 0
+    slope = (n * sum_xy - sum_x * sum_y) / denominator
+    intercept = (sum_y - slope * sum_x) / n
+    return slope, intercept
+
+
+def validate_password(password: str) -> tuple[bool, str]:
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long."
+    if len(password) > 128:
+        return False, "Password must be 128 characters or fewer."
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must contain at least one uppercase letter."
+    if not re.search(r"[a-z]", password):
+        return False, "Password must contain at least one lowercase letter."
+    if not re.search(r"\d", password):
+        return False, "Password must contain at least one digit."
+    return True, ""
+
+
+def category_map(user_id: int = None) -> dict[str, Category]:
+    if user_id:
+        cats = Category.query.filter((Category.user_id == None) | (Category.user_id == user_id)).all()
+    else:
+        cats = Category.query.all()
+    return {c.name.lower(): c for c in cats}
+
+
+def register_routes(app: Flask, csrf, limiter) -> None:
     @app.context_processor
     def inject_globals():
         user = current_user()
         return {
             "current_user": user,
-            "money": money,
+            "money": lambda value: format_money(user, value),
             "today": date.today().isoformat(),
         }
 
@@ -125,26 +248,29 @@ def register_routes(app: Flask) -> None:
             name = request.form.get("name", "").strip()
             email = request.form.get("email", "").strip().lower()
             password = request.form.get("password", "")
-            if not name or not email or len(password) < 6:
-                flash("Name, email and a password of 6+ characters are required.", "danger")
+            if not name or len(name) > 120 or not email or len(email) > 180 or not password:
+                flash("Name, email and password are required.", "danger")
                 return render_template("register.html")
-            try:
-                if User.query.filter_by(email=email).first():
-                    flash("That email is already registered.", "danger")
-                    return render_template("register.html")
-                user = User(name=name, email=email, password_hash=generate_password_hash(password))
-                db.session.add(user)
-                db.session.commit()
-                session["user_id"] = user.id
-                flash("Welcome to Aureum. Your ledger is ready.", "success")
-                return redirect(url_for("dashboard"))
-            except Exception as e:
-                db.session.rollback()
-                flash(f"Registration failed: {str(e)}", "danger")
+            if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+                flash("Enter a valid email address.", "danger")
                 return render_template("register.html")
+            valid, msg = validate_password(password)
+            if not valid:
+                flash(msg, "danger")
+                return render_template("register.html")
+            if User.query.filter_by(email=email).first():
+                flash("That email is already registered.", "danger")
+                return render_template("register.html")
+            user = User(name=name, email=email, password_hash=generate_password_hash(password))
+            db.session.add(user)
+            db.session.commit()
+            session["user_id"] = user.id
+            flash("Welcome to Aureum. Your ledger is ready.", "success")
+            return redirect(url_for("dashboard"))
         return render_template("register.html")
 
     @app.route("/login", methods=["GET", "POST"])
+    @limiter.limit("5 per 15 minutes")
     def login():
         if request.method == "POST":
             email = request.form.get("email", "").strip().lower()
@@ -154,6 +280,7 @@ def register_routes(app: Flask) -> None:
                 flash("Invalid email or password.", "danger")
                 return render_template("login.html")
             session["user_id"] = user.id
+            process_recurring_transactions()
             flash(f"Welcome back, {user.name.split()[0]}.", "success")
             return redirect(url_for("dashboard"))
         return render_template("login.html")
@@ -173,7 +300,7 @@ def register_routes(app: Flask) -> None:
             db.session.commit()
             seed_demo_data(user)
         session["user_id"] = user.id
-        flash("Demo mode: This is a sample account. Create your own account to save your data permanently.", "info")
+        flash("Demo workspace loaded with sample money stories.", "success")
         return redirect(url_for("dashboard"))
 
     @app.route("/logout")
@@ -181,6 +308,47 @@ def register_routes(app: Flask) -> None:
         session.clear()
         flash("Signed out. Your numbers stay private.", "success")
         return redirect(url_for("login"))
+
+    @app.route("/forgot-password", methods=["GET", "POST"])
+    @limiter.limit("5 per hour")
+    def forgot_password():
+        if request.method == "POST":
+            email = request.form.get("email", "").strip().lower()
+            user = User.query.filter_by(email=email).first()
+            if user:
+                token = uuid.uuid4().hex
+                user.reset_token = token
+                user.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
+                db.session.commit()
+                reset_link = f"{request.host_url}reset-password?token={token}"
+                if app.debug or app.config.get("PASSWORD_RESET_LOGS", False):
+                    print(f"\n{'='*60}\nPASSWORD RESET LINK FOR {email}:\n{reset_link}\n{'='*60}\n")
+            flash("If that email exists, a reset link was generated. Check the console/logs in development.", "info")
+            return render_template("forgot_password.html")
+        return render_template("forgot_password.html")
+
+    @app.route("/reset-password", methods=["GET", "POST"])
+    @limiter.limit("10 per hour")
+    def reset_password():
+        token = request.args.get("token", "")
+        if request.method == "POST":
+            token = request.form.get("token", "")
+            password = request.form.get("password", "")
+            user = User.query.filter_by(reset_token=token).first()
+            if not user or not user.reset_token_expires or user.reset_token_expires < datetime.utcnow():
+                flash("Invalid or expired reset link.", "danger")
+                return redirect(url_for("login"))
+            valid, msg = validate_password(password)
+            if not valid:
+                flash(msg, "danger")
+                return render_template("reset_password.html", token=token)
+            user.password_hash = generate_password_hash(password)
+            user.reset_token = ""
+            user.reset_token_expires = None
+            db.session.commit()
+            flash("Password reset. Sign in with your new password.", "success")
+            return redirect(url_for("login"))
+        return render_template("reset_password.html", token=token)
 
     @app.route("/dashboard")
     @login_required
@@ -231,6 +399,11 @@ def register_routes(app: Flask) -> None:
             trend_income.append(round(sum(t.amount for t in month_set.filter_by(kind="income")), 2))
             trend_expense.append(round(sum(t.amount for t in month_set.filter_by(kind="expense")), 2))
 
+        slope, intercept = linear_regression(trend_expense)
+        regression_forecast = max(0, intercept + slope * len(trend_expense))
+        daily_forecast = expense / max(today.day, 1) * end.day
+        forecast = round((daily_forecast + regression_forecast) / 2, 2)
+
         recent = (
             Transaction.query.filter_by(user_id=user.id)
             .order_by(Transaction.txn_date.desc(), Transaction.id.desc())
@@ -239,6 +412,8 @@ def register_routes(app: Flask) -> None:
         )
         budgets = Budget.query.filter_by(user_id=user.id, month=today.month, year=today.year).all()
         budget_cards = []
+        over_budget = []
+        near_budget = []
         for b in budgets:
             spent = sum(
                 t.amount
@@ -247,7 +422,12 @@ def register_routes(app: Flask) -> None:
                 )
             )
             pct = min(100, round(spent / b.amount * 100, 1)) if b.amount else 0
-            budget_cards.append({"budget": b, "spent": spent, "pct": pct})
+            card = {"budget": b, "spent": spent, "pct": pct}
+            budget_cards.append(card)
+            if pct >= 100:
+                over_budget.append(card)
+            elif pct >= 80:
+                near_budget.append(card)
 
         goals = Goal.query.filter_by(user_id=user.id).all()
         insights = build_insights(user, expense, prev_expense, cat_rows, budget_cards)
@@ -265,10 +445,13 @@ def register_routes(app: Flask) -> None:
             trend_labels=trend_labels,
             trend_income=trend_income,
             trend_expense=trend_expense,
+            forecast=forecast,
             recent=recent,
             budget_cards=budget_cards,
             goals=goals,
             insights=insights,
+            over_budget=over_budget,
+            near_budget=near_budget,
         )
 
     @app.route("/transactions")
@@ -284,16 +467,31 @@ def register_routes(app: Flask) -> None:
         if kind in {"income", "expense"}:
             q = q.filter_by(kind=kind)
         if category_id:
-            q = q.filter_by(category_id=int(category_id))
+            try:
+                category_id_int = int(category_id)
+            except ValueError:
+                flash("Choose a valid category filter.", "warning")
+                return redirect(url_for("transactions"))
+            if valid_user_category(category_id_int, user.id):
+                q = q.filter_by(category_id=category_id_int)
         if search:
             like = f"%{search}%"
-            q = q.filter(or_(Transaction.note.ilike(like), Transaction.merchant.ilike(like)))
-        if start:
-            q = q.filter(Transaction.txn_date >= datetime.strptime(start, "%Y-%m-%d").date())
-        if end:
-            q = q.filter(Transaction.txn_date <= datetime.strptime(end, "%Y-%m-%d").date())
+            conditions = [Transaction.note.ilike(like), Transaction.merchant.ilike(like)]
+            try:
+                conditions.append(Transaction.amount == float(search))
+            except ValueError:
+                pass
+            q = q.filter(or_(*conditions))
+        try:
+            if start:
+                q = q.filter(Transaction.txn_date >= datetime.strptime(start, "%Y-%m-%d").date())
+            if end:
+                q = q.filter(Transaction.txn_date <= datetime.strptime(end, "%Y-%m-%d").date())
+        except ValueError:
+            flash("Use valid dates for the transaction filter.", "warning")
+            return redirect(url_for("transactions"))
         rows = q.order_by(Transaction.txn_date.desc(), Transaction.id.desc()).all()
-        categories = Category.query.order_by(Category.kind, Category.name).all()
+        categories = Category.query.filter((Category.user_id == None) | (Category.user_id == user.id)).order_by(Category.kind, Category.name).all()
         return render_template(
             "transactions.html",
             rows=rows,
@@ -309,38 +507,94 @@ def register_routes(app: Flask) -> None:
             amount = float(request.form.get("amount") or 0)
         except ValueError:
             amount = 0
-        if amount <= 0:
-            flash("Enter a valid amount.", "danger")
+        if not math.isfinite(amount) or amount <= 0:
+            flash("Enter a valid amount greater than 0.", "danger")
+            return redirect(url_for("transactions"))
+        try:
+            category_id = int(request.form["category_id"])
+        except (ValueError, KeyError):
+            flash("Invalid category.", "danger")
+            return redirect(url_for("transactions"))
+        kind = request.form.get("kind", "expense")
+        if kind not in ("income", "expense"):
+            flash("Invalid transaction type.", "danger")
+            return redirect(url_for("transactions"))
+        if not valid_user_category(category_id, user.id, kind):
+            flash("Choose an available category for this transaction type.", "danger")
+            return redirect(url_for("transactions"))
+        note = request.form.get("note", "").strip()[:255]
+        merchant = request.form.get("merchant", "").strip()[:120]
+        payment_method = request.form.get("payment_method", "UPI")[:40]
+        if payment_method not in {"UPI", "Card", "Cash", "Net Banking", "Wallet", "Bank"}:
+            flash("Choose a supported payment method.", "danger")
+            return redirect(url_for("transactions"))
+        try:
+            txn_date = datetime.strptime(request.form.get("txn_date") or date.today().isoformat(), "%Y-%m-%d").date()
+        except ValueError:
+            flash("Invalid date format.", "danger")
             return redirect(url_for("transactions"))
         txn = Transaction(
             user_id=user.id,
-            category_id=int(request.form["category_id"]),
+            category_id=category_id,
             amount=amount,
-            kind=request.form.get("kind", "expense"),
-            note=request.form.get("note", "").strip(),
-            merchant=request.form.get("merchant", "").strip(),
-            payment_method=request.form.get("payment_method", "UPI"),
-            txn_date=datetime.strptime(request.form.get("txn_date") or date.today().isoformat(), "%Y-%m-%d").date(),
+            kind=kind,
+            note=note,
+            merchant=merchant,
+            payment_method=payment_method,
+            txn_date=txn_date,
             source=request.form.get("source", "manual"),
-            receipt_path=request.form.get("receipt_path", ""),
+            receipt_path=request.form.get("receipt_path", "")[:255],
         )
         db.session.add(txn)
         db.session.commit()
         flash("Transaction saved.", "success")
-        next_page = request.form.get("next") or "transactions"
+        next_page = request.form.get("next")
+        if next_page not in {"transactions", "dashboard"}:
+            next_page = "transactions"
         return redirect(url_for(next_page))
 
     @app.route("/transactions/<int:txn_id>/edit", methods=["POST"])
     @login_required
     def edit_transaction(txn_id: int):
         txn = Transaction.query.filter_by(id=txn_id, user_id=session["user_id"]).first_or_404()
-        txn.amount = float(request.form.get("amount") or txn.amount)
-        txn.category_id = int(request.form.get("category_id") or txn.category_id)
-        txn.kind = request.form.get("kind", txn.kind)
-        txn.note = request.form.get("note", "").strip()
-        txn.merchant = request.form.get("merchant", "").strip()
-        txn.payment_method = request.form.get("payment_method", txn.payment_method)
-        txn.txn_date = datetime.strptime(request.form.get("txn_date"), "%Y-%m-%d").date()
+        try:
+            amount = float(request.form.get("amount") or txn.amount)
+        except ValueError:
+            flash("Invalid amount.", "danger")
+            return redirect(url_for("transactions"))
+        if not math.isfinite(amount) or amount <= 0:
+            flash("Amount must be greater than 0.", "danger")
+            return redirect(url_for("transactions"))
+        try:
+            category_id = int(request.form.get("category_id") or txn.category_id)
+        except ValueError:
+            flash("Invalid category.", "danger")
+            return redirect(url_for("transactions"))
+        if not valid_user_category(category_id, session["user_id"], request.form.get("kind", txn.kind)):
+            flash("Choose an available category for this transaction.", "danger")
+            return redirect(url_for("transactions"))
+        kind = request.form.get("kind", txn.kind)
+        if kind not in ("income", "expense"):
+            flash("Invalid transaction type.", "danger")
+            return redirect(url_for("transactions"))
+        note = request.form.get("note", "").strip()[:255]
+        merchant = request.form.get("merchant", "").strip()[:120]
+        payment_method = request.form.get("payment_method", txn.payment_method)[:40]
+        if payment_method not in {"UPI", "Card", "Cash", "Net Banking", "Wallet", "Bank"}:
+            flash("Choose a supported payment method.", "danger")
+            return redirect(url_for("transactions"))
+        try:
+            txn_date = datetime.strptime(request.form.get("txn_date"), "%Y-%m-%d").date()
+        except ValueError:
+            flash("Invalid date format.", "danger")
+            return redirect(url_for("transactions"))
+        txn.amount = amount
+        txn.category_id = category_id
+        txn.kind = kind
+        txn.note = note
+        txn.merchant = merchant
+        txn.payment_method = payment_method
+        txn.txn_date = txn_date
         db.session.commit()
         flash("Transaction updated.", "success")
         return redirect(url_for("transactions"))
@@ -354,10 +608,51 @@ def register_routes(app: Flask) -> None:
         flash("Transaction removed.", "success")
         return redirect(url_for("transactions"))
 
+    @app.route("/transactions/bulk", methods=["POST"])
+    @login_required
+    def bulk_transaction_action():
+        user = current_user()
+        action = request.form.get("action")
+        selected_ids = request.form.getlist("selected")
+        if not selected_ids:
+            flash("No transactions selected.", "warning")
+            return redirect(url_for("transactions"))
+        try:
+            selected_ids = [int(i) for i in selected_ids]
+        except ValueError:
+            flash("Invalid selection.", "danger")
+            return redirect(url_for("transactions"))
+        txns = Transaction.query.filter(Transaction.id.in_(selected_ids), Transaction.user_id == user.id).all()
+        if action == "delete":
+            for txn in txns:
+                db.session.delete(txn)
+            db.session.commit()
+            flash(f"{len(txns)} transaction(s) deleted.", "success")
+        elif action == "change_category":
+            try:
+                new_category_id = int(request.form.get("new_category_id"))
+            except (ValueError, TypeError):
+                flash("Invalid category.", "danger")
+                return redirect(url_for("transactions"))
+            if not valid_user_category(new_category_id, user.id):
+                flash("Choose one of your available categories.", "danger")
+                return redirect(url_for("transactions"))
+            for txn in txns:
+                txn.category_id = new_category_id
+            db.session.commit()
+            flash(f"{len(txns)} transaction(s) updated.", "success")
+        else:
+            flash("Invalid action.", "danger")
+        return redirect(url_for("transactions"))
+
     @app.route("/scan")
     @login_required
     def scan():
-        categories = Category.query.filter_by(kind="expense").order_by(Category.name).all()
+        user = current_user()
+        categories = Category.query.filter(
+            (Category.kind == "expense"),
+            ((Category.user_id == None) | (Category.user_id == user.id))
+        ).order_by(Category.name).all()
         return render_template("scan.html", categories=categories)
 
     @app.route("/scan/parse", methods=["POST"])
@@ -365,7 +660,8 @@ def register_routes(app: Flask) -> None:
     def scan_parse():
         text = request.json.get("text", "") if request.is_json else request.form.get("text", "")
         parsed = parse_receipt_text(text)
-        cats = category_map()
+        user = current_user()
+        cats = category_map(user.id)
         category = cats.get(parsed["category"].lower()) or cats.get("other")
         parsed["category_id"] = category.id if category else None
         parsed["category_name"] = category.name if category else "Other"
@@ -391,22 +687,38 @@ def register_routes(app: Flask) -> None:
         user = current_user()
         today = date.today()
         if request.method == "POST":
+            try:
+                category_id = int(request.form["category_id"])
+            except (ValueError, KeyError):
+                flash("Invalid category.", "danger")
+                return redirect(url_for("budgets"))
+            if not valid_user_category(category_id, user.id, "expense"):
+                flash("Choose one of your available expense categories.", "danger")
+                return redirect(url_for("budgets"))
+            try:
+                amount = float(request.form["amount"])
+            except (ValueError, KeyError):
+                flash("Invalid amount.", "danger")
+                return redirect(url_for("budgets"))
+            if not math.isfinite(amount) or amount <= 0:
+                flash("Budget amount must be greater than 0.", "danger")
+                return redirect(url_for("budgets"))
             existing = Budget.query.filter_by(
                 user_id=user.id,
-                category_id=int(request.form["category_id"]),
+                category_id=category_id,
                 month=today.month,
                 year=today.year,
             ).first()
             if existing:
-                existing.amount = float(request.form["amount"])
+                existing.amount = amount
             else:
                 db.session.add(
                     Budget(
                         user_id=user.id,
-                        category_id=int(request.form["category_id"]),
+                        category_id=category_id,
                         month=today.month,
                         year=today.year,
-                        amount=float(request.form["amount"]),
+                        amount=amount,
                     )
                 )
             db.session.commit()
@@ -415,6 +727,8 @@ def register_routes(app: Flask) -> None:
 
         start, end = month_bounds(today.year, today.month)
         rows = []
+        over_budget = []
+        near_budget = []
         for b in Budget.query.filter_by(user_id=user.id, month=today.month, year=today.year).all():
             spent = sum(
                 t.amount
@@ -422,9 +736,18 @@ def register_routes(app: Flask) -> None:
                     Transaction.txn_date.between(start, end)
                 )
             )
-            rows.append({"budget": b, "spent": spent, "pct": min(100, spent / b.amount * 100) if b.amount else 0})
-        categories = Category.query.filter_by(kind="expense").order_by(Category.name).all()
-        return render_template("budgets.html", rows=rows, categories=categories, month=today.strftime("%B %Y"))
+            pct = min(100, spent / b.amount * 100) if b.amount else 0
+            row = {"budget": b, "spent": spent, "pct": pct}
+            rows.append(row)
+            if pct >= 100:
+                over_budget.append(row)
+            elif pct >= 80:
+                near_budget.append(row)
+        categories = Category.query.filter(
+            (Category.kind == "expense"),
+            ((Category.user_id == None) | (Category.user_id == user.id))
+        ).order_by(Category.name).all()
+        return render_template("budgets.html", rows=rows, categories=categories, month=today.strftime("%B %Y"), over_budget=over_budget, near_budget=near_budget)
 
     @app.route("/budgets/<int:budget_id>/delete", methods=["POST"])
     @login_required
@@ -439,8 +762,17 @@ def register_routes(app: Flask) -> None:
     @login_required
     def reports():
         user = current_user()
-        year = int(request.args.get("year", date.today().year))
+        try:
+            year = int(request.args.get("year", date.today().year))
+            if not 2000 <= year <= date.today().year + 1:
+                raise ValueError
+        except ValueError:
+            flash("Choose a valid report year.", "warning")
+            return redirect(url_for("reports"))
         month = request.args.get("month", "")
+        if month and (not month.isdigit() or not 1 <= int(month) <= 12):
+            flash("Choose a valid month.", "warning")
+            return redirect(url_for("reports", year=year))
         q = Transaction.query.filter_by(user_id=user.id).filter(extract("year", Transaction.txn_date) == year)
         if month:
             q = q.filter(extract("month", Transaction.txn_date) == int(month))
@@ -468,6 +800,55 @@ def register_routes(app: Flask) -> None:
                 }
             )
         years = sorted({t.txn_date.year for t in Transaction.query.filter_by(user_id=user.id)}, reverse=True) or [year]
+        weekdays = [0.0] * 7
+        merchants = {}
+        for txn in txns:
+            if txn.kind == "expense":
+                weekdays[txn.txn_date.weekday()] += txn.amount
+                name = txn.merchant or "Unknown merchant"
+                merchants[name] = merchants.get(name, 0) + txn.amount
+        comparison = []
+        if month:
+            current_month = int(month)
+            previous_year, previous_month = (year - 1, 12) if current_month == 1 else (year, current_month - 1)
+            pstart, pend = month_bounds(previous_year, previous_month)
+            previous = {}
+            for txn in Transaction.query.filter_by(user_id=user.id, kind="expense").filter(Transaction.txn_date.between(pstart, pend)).all():
+                previous[txn.category.name] = previous.get(txn.category.name, 0) + txn.amount
+            for name in sorted(set(by_cat) | set(previous)):
+                old, new = previous.get(name, 0), by_cat.get(name, 0)
+                comparison.append((name, old, new, new-old, ((new-old)/old*100 if old else (100 if new else 0))))
+        today = date.today()
+        month_start, month_end = month_bounds(today.year, today.month)
+        elapsed_days = max(today.day, 1)
+        current_month_expense = sum(t.amount for t in Transaction.query.filter_by(user_id=user.id, kind="expense").filter(Transaction.txn_date.between(month_start, today)).all())
+        daily_projection = current_month_expense / elapsed_days * month_end.day
+        monthly_values = [row["expense"] for row in monthly]
+        slope, intercept = linear_regression(monthly_values)
+        forecast = round(max(0, (daily_projection + intercept + slope * len(monthly_values)) / 2), 2)
+        user_expenses = Transaction.query.filter_by(user_id=user.id, kind="expense").all()
+        totals = {}
+        for txn in user_expenses:
+            totals.setdefault(txn.category_id, []).append(txn)
+        anomalies = []
+        for txn in txns:
+            history_for_category = [entry.amount for entry in totals.get(txn.category_id, []) if entry.txn_date < txn.txn_date]
+            if txn.kind == "expense" and len(history_for_category) >= 2:
+                mean = sum(history_for_category) / len(history_for_category)
+                stdev = (sum((v-mean)**2 for v in history_for_category) / len(history_for_category)) ** .5
+                if txn.amount > mean + 2*stdev:
+                    anomalies.append(txn)
+        this_month_income = sum(t.amount for t in Transaction.query.filter_by(user_id=user.id, kind="income").filter(Transaction.txn_date.between(month_start, today)).all())
+        savings_rate = max(0, min(100, (this_month_income-current_month_expense)/this_month_income*100 if this_month_income else 0))
+        budget_rows = Budget.query.filter_by(user_id=user.id, month=today.month, year=today.year).all()
+        adherence = []
+        for budget in budget_rows:
+            spent = sum(t.amount for t in Transaction.query.filter_by(user_id=user.id, category_id=budget.category_id, kind="expense").filter(Transaction.txn_date.between(month_start, today)).all())
+            adherence.append(min(100, budget.amount/spent*100) if spent > budget.amount else 100)
+        budget_score = sum(adherence)/len(adherence) if adherence else 60
+        goals = Goal.query.filter_by(user_id=user.id).all()
+        goal_score = sum(min(100, g.saved_amount/g.target_amount*100) for g in goals)/len(goals) if goals else 50
+        health_score = round(savings_rate*.4 + budget_score*.35 + goal_score*.25)
         return render_template(
             "reports.html",
             year=year,
@@ -480,6 +861,15 @@ def register_routes(app: Flask) -> None:
             by_method=by_method,
             monthly=monthly,
             calendar=calendar,
+            comparison=comparison,
+            weekdays=weekdays,
+            top_merchants=sorted(merchants.items(), key=lambda item: item[1], reverse=True)[:8],
+            top_merchant_labels=[item[0] for item in sorted(merchants.items(), key=lambda item: item[1], reverse=True)[:8]],
+            top_merchant_values=[item[1] for item in sorted(merchants.items(), key=lambda item: item[1], reverse=True)[:8]],
+            forecast=forecast,
+            anomalies=anomalies,
+            health_score=health_score,
+            health_tips=["Save a small amount as soon as income arrives.", "Review categories approaching their budget.", "Set a clear target and deadline for one savings goal."],
         )
 
     @app.route("/reports/export")
@@ -496,19 +886,185 @@ def register_routes(app: Flask) -> None:
         mem.seek(0)
         return send_file(mem, mimetype="text/csv", as_attachment=True, download_name="aureum-transactions.csv")
 
+    @app.route("/reports/export.xlsx")
+    @login_required
+    def export_xlsx():
+        from openpyxl import Workbook
+        user = current_user()
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Transactions"
+        sheet.append(["Date", "Type", "Category", "Merchant", "Amount", "Payment", "Note", "Source"])
+        for t in Transaction.query.filter_by(user_id=user.id).order_by(Transaction.txn_date.desc()).all():
+            sheet.append([t.txn_date.isoformat(), t.kind, t.category.name, t.merchant, t.amount, t.payment_method, t.note, t.source])
+        output = io.BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="aureum-transactions.xlsx")
+
+    @app.route("/reports/pdf")
+    @login_required
+    def export_pdf():
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        user = current_user()
+        year_value = request.args.get("year", type=int)
+        month_value = request.args.get("month", type=int)
+        query = Transaction.query.filter_by(user_id=user.id)
+        if year_value and 2000 <= year_value <= date.today().year + 1:
+            query = query.filter(extract("year", Transaction.txn_date) == year_value)
+        if month_value and 1 <= month_value <= 12:
+            query = query.filter(extract("month", Transaction.txn_date) == month_value)
+        rows = query.order_by(Transaction.txn_date.desc()).limit(1000).all()
+        income_total = sum(t.amount for t in rows if t.kind == "income")
+        expense_total = sum(t.amount for t in rows if t.kind == "expense")
+        top_expenses = sorted((t for t in rows if t.kind == "expense"), key=lambda t: t.amount, reverse=True)[:5]
+        output = io.BytesIO()
+        page = canvas.Canvas(output, pagesize=letter)
+        page.setTitle("Aureum financial report")
+        page.setFont("Helvetica-Bold", 18)
+        page.drawString(48, 748, "Aureum Financial Report")
+        page.setFont("Helvetica", 10)
+        page.drawString(48, 728, f"{user.name} - Generated {date.today().isoformat()} - Latest 100 transactions")
+        page.drawString(48, 708, f"Income: {income_total:,.2f}       Expenses: {expense_total:,.2f}       Net: {income_total-expense_total:,.2f}")
+        # A small vector bar chart keeps the PDF self-contained.
+        max_amount = max(income_total, expense_total, 1)
+        page.setFillColorRGB(.12, .65, .48)
+        page.rect(60, 625, 180 * income_total / max_amount, 18, fill=1, stroke=0)
+        page.setFillColorRGB(.92, .38, .35)
+        page.rect(60, 595, 180 * expense_total / max_amount, 18, fill=1, stroke=0)
+        page.setFillColorRGB(0, 0, 0)
+        page.drawString(250, 630, "Income")
+        page.drawString(250, 600, "Expenses")
+        page.setFont("Helvetica-Bold", 10)
+        page.drawString(48, 565, "Top expenses")
+        page.setFont("Helvetica", 9)
+        y = 548
+        for txn in top_expenses:
+            page.drawString(48, y, f"{txn.txn_date}  {txn.merchant or txn.category.name}  {txn.amount:,.2f}")
+            y -= 14
+        y = 700
+        page.setFont("Helvetica-Bold", 9)
+        page.drawString(48, y, "Date       Type       Category             Merchant                 Amount")
+        page.setFont("Helvetica", 8)
+        for t in rows:
+            y -= 15
+            if y < 45:
+                page.showPage()
+                y = 750
+            page.drawString(48, y, f"{t.txn_date}  {t.kind:<8} {t.category.name[:18]:<19} {(t.merchant or t.note)[:24]:<25} {t.amount:,.2f}")
+        page.save()
+        output.seek(0)
+        return send_file(output, mimetype="application/pdf", as_attachment=True, download_name="aureum-report.pdf")
+
+    @app.route("/reports/print")
+    @login_required
+    def printable_report():
+        user = current_user()
+        rows = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.txn_date.desc()).limit(200).all()
+        return render_template("print_report.html", rows=rows)
+
+    @app.route("/reports/import", methods=["GET", "POST"])
+    @login_required
+    def import_csv():
+        if request.method == "GET":
+            return render_template("import.html", headers=[], sample=[])
+        file = request.files.get("file")
+        if not file or not file.filename.lower().endswith(".csv"):
+            flash("Choose a CSV file to import.", "danger")
+            return redirect(url_for("import_csv"))
+        try:
+            rows = list(csv.DictReader(io.StringIO(file.stream.read().decode("utf-8-sig"))))
+        except (UnicodeDecodeError, csv.Error):
+            flash("That CSV could not be read. Save it as UTF-8 and try again.", "danger")
+            return redirect(url_for("import_csv"))
+        headers = list(rows[0].keys()) if rows else []
+        if not headers:
+            flash("The CSV has no transaction rows.", "warning")
+            return redirect(url_for("import_csv"))
+        mappings = {key: request.form.get(key, "") for key in ("date", "amount", "type", "category", "merchant", "payment", "note")}
+        if request.form.get("confirm") != "yes":
+            return render_template("import.html", headers=headers, sample=rows[:5], mappings=mappings)
+        if any(value not in headers for key, value in mappings.items() if key in {"date", "amount"}):
+            flash("Map at least the date and amount columns.", "danger")
+            return render_template("import.html", headers=headers, sample=rows[:5], mappings=mappings)
+        user = current_user()
+        cats = category_map(user.id)
+        fallback = cats.get("other")
+        added = skipped = 0
+        for row in rows:
+            try:
+                amount = float(row[mappings["amount"]].replace(",", "").replace("₹", "").strip())
+                txn_date = datetime.strptime(row[mappings["date"]].strip(), "%Y-%m-%d").date()
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError, KeyError, AttributeError):
+                skipped += 1
+                continue
+            kind = (row.get(mappings.get("type", ""), "expense") or "expense").lower()
+            if kind not in {"income", "expense"}:
+                skipped += 1
+                continue
+            category_name = (row.get(mappings.get("category", ""), "") or "").strip().lower()
+            category = cats.get(category_name) or fallback
+            if not category or not valid_user_category(category.id, user.id):
+                skipped += 1
+                continue
+            merchant = (row.get(mappings.get("merchant", ""), "") or "")[:120]
+            note = (row.get(mappings.get("note", ""), "") or "")[:255]
+            payment = (row.get(mappings.get("payment", ""), "") or "UPI")[:40]
+            fingerprint = hashlib.sha256(f"{user.id}|{txn_date}|{kind}|{category.id}|{amount:.2f}|{merchant}|{note}".encode()).hexdigest()
+            duplicate = ImportBatch.query.filter_by(user_id=user.id, fingerprint=fingerprint).first()
+            duplicate = duplicate or Transaction.query.filter_by(user_id=user.id, txn_date=txn_date, kind=kind, category_id=category.id, amount=amount, merchant=merchant, note=note).first()
+            if duplicate:
+                skipped += 1
+                continue
+            db.session.add(Transaction(user_id=user.id, category_id=category.id, amount=amount, kind=kind, txn_date=txn_date,
+                                       merchant=merchant, note=note, payment_method=payment, source="import"))
+            db.session.add(ImportBatch(user_id=user.id, fingerprint=fingerprint))
+            added += 1
+        db.session.commit()
+        flash(f"Imported {added} transaction(s); skipped {skipped} invalid or duplicate row(s).", "success")
+        return redirect(url_for("transactions"))
+
     @app.route("/goals", methods=["GET", "POST"])
     @login_required
     def goals():
         user = current_user()
         if request.method == "POST":
+            name = request.form.get("name", "").strip()[:120]
+            if not name:
+                flash("Goal name is required.", "danger")
+                return redirect(url_for("goals"))
+            try:
+                target_amount = float(request.form["target_amount"])
+            except (ValueError, KeyError):
+                flash("Invalid target amount.", "danger")
+                return redirect(url_for("goals"))
+            if not math.isfinite(target_amount) or target_amount <= 0:
+                flash("Target amount must be greater than 0.", "danger")
+                return redirect(url_for("goals"))
+            try:
+                saved_amount = float(request.form.get("saved_amount") or 0)
+            except (ValueError, TypeError):
+                saved_amount = 0
+            if not math.isfinite(saved_amount) or saved_amount < 0:
+                flash("Saved amount cannot be negative.", "danger")
+                return redirect(url_for("goals"))
             deadline = request.form.get("deadline") or None
+            if deadline:
+                try:
+                    deadline = datetime.strptime(deadline, "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                    flash("Invalid deadline date.", "danger")
+                    return redirect(url_for("goals"))
             db.session.add(
                 Goal(
                     user_id=user.id,
-                    name=request.form["name"].strip(),
-                    target_amount=float(request.form["target_amount"]),
-                    saved_amount=float(request.form.get("saved_amount") or 0),
-                    deadline=datetime.strptime(deadline, "%Y-%m-%d").date() if deadline else None,
+                    name=name,
+                    target_amount=target_amount,
+                    saved_amount=saved_amount,
+                    deadline=deadline,
                 )
             )
             db.session.commit()
@@ -521,7 +1077,15 @@ def register_routes(app: Flask) -> None:
     @login_required
     def add_to_goal(goal_id: int):
         goal = Goal.query.filter_by(id=goal_id, user_id=session["user_id"]).first_or_404()
-        goal.saved_amount += float(request.form.get("amount") or 0)
+        try:
+            amount = float(request.form.get("amount") or 0)
+        except ValueError:
+            flash("Invalid amount.", "danger")
+            return redirect(url_for("goals"))
+        if not math.isfinite(amount) or amount <= 0:
+            flash("Amount must be greater than 0.", "danger")
+            return redirect(url_for("goals"))
+        goal.saved_amount += amount
         db.session.commit()
         flash("Saved towards your goal.", "success")
         return redirect(url_for("goals"))
@@ -539,16 +1103,275 @@ def register_routes(app: Flask) -> None:
     def profile():
         user = current_user()
         if request.method == "POST":
-            user.name = request.form.get("name", user.name).strip()
-            user.phone = request.form.get("phone", "").strip()
-            user.monthly_income = float(request.form.get("monthly_income") or 0)
+            if request.form.get("delete_account") == "yes":
+                if not check_password_hash(user.password_hash, request.form.get("current_password", "")):
+                    flash("Enter your current password to delete the account.", "danger")
+                    return render_template("profile.html", user=user)
+                for model in (Transaction, Budget, Goal, RecurringTransaction, Transfer, ImportBatch):
+                    model.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+                Category.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+                db.session.delete(user)
+                db.session.commit()
+                session.clear()
+                flash("Your account has been deleted.", "success")
+                return redirect(url_for("login"))
+            name = request.form.get("name", user.name).strip()[:120]
+            if not name:
+                flash("Name is required.", "danger")
+                return render_template("profile.html", user=user)
+            user.name = name
+            user.phone = request.form.get("phone", "").strip()[:20]
+            try:
+                monthly_income = float(request.form.get("monthly_income") or 0)
+            except ValueError:
+                flash("Invalid monthly income.", "danger")
+                return render_template("profile.html", user=user)
+            if not math.isfinite(monthly_income) or monthly_income < 0:
+                flash("Monthly income cannot be negative.", "danger")
+                return render_template("profile.html", user=user)
+            user.monthly_income = monthly_income
+            currency = request.form.get("currency", "INR")
+            if currency not in {"INR", "USD", "EUR", "GBP"}:
+                flash("Choose a supported currency.", "danger")
+                return render_template("profile.html", user=user)
+            user.currency = currency
+            user.theme = "light" if request.form.get("theme") == "light" else "dark"
             new_password = request.form.get("password", "")
-            if len(new_password) >= 6:
+            if new_password:
+                if not check_password_hash(user.password_hash, request.form.get("current_password", "")):
+                    flash("Enter your current password before changing it.", "danger")
+                    return render_template("profile.html", user=user)
+                valid, msg = validate_password(new_password)
+                if not valid:
+                    flash(msg, "danger")
+                    return render_template("profile.html", user=user)
                 user.password_hash = generate_password_hash(new_password)
             db.session.commit()
             flash("Profile updated.", "success")
             return redirect(url_for("profile"))
         return render_template("profile.html", user=user)
+
+    @app.route("/recurring", methods=["GET", "POST"])
+    @login_required
+    def recurring():
+        user = current_user()
+        if request.method == "POST":
+            try:
+                category_id = int(request.form["category_id"])
+            except (ValueError, KeyError):
+                flash("Invalid category.", "danger")
+                return redirect(url_for("recurring"))
+            if not valid_user_category(category_id, user.id, request.form.get("kind", "expense")):
+                flash("Choose an available category for this recurring transaction.", "danger")
+                return redirect(url_for("recurring"))
+            try:
+                amount = float(request.form["amount"])
+            except (ValueError, KeyError):
+                flash("Invalid amount.", "danger")
+                return redirect(url_for("recurring"))
+            if not math.isfinite(amount) or amount <= 0:
+                flash("Amount must be greater than 0.", "danger")
+                return redirect(url_for("recurring"))
+            kind = request.form.get("kind", "expense")
+            if kind not in ("income", "expense"):
+                flash("Invalid transaction type.", "danger")
+                return redirect(url_for("recurring"))
+            frequency = request.form.get("frequency", "monthly")
+            if frequency not in ("daily", "weekly", "monthly", "yearly"):
+                flash("Invalid frequency.", "danger")
+                return redirect(url_for("recurring"))
+            try:
+                next_due_date = datetime.strptime(request.form.get("next_due_date"), "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                flash("Invalid date format.", "danger")
+                return redirect(url_for("recurring"))
+            db.session.add(
+                RecurringTransaction(
+                    user_id=user.id,
+                    category_id=category_id,
+                    amount=amount,
+                    kind=kind,
+                    note=request.form.get("note", "").strip()[:255],
+                    merchant=request.form.get("merchant", "").strip()[:120],
+                    payment_method=request.form.get("payment_method", "UPI")[:40],
+                    frequency=frequency,
+                    next_due_date=next_due_date,
+                )
+            )
+            db.session.commit()
+            flash("Recurring transaction created.", "success")
+            return redirect(url_for("recurring"))
+        items = RecurringTransaction.query.filter_by(user_id=user.id).order_by(RecurringTransaction.next_due_date).all()
+        categories = Category.query.filter((Category.user_id == None) | (Category.user_id == user.id)).order_by(Category.kind, Category.name).all()
+        return render_template("recurring.html", items=items, categories=categories)
+
+    @app.route("/recurring/<int:rec_id>/pause", methods=["POST"])
+    @login_required
+    def pause_recurring(rec_id: int):
+        rec = RecurringTransaction.query.filter_by(id=rec_id, user_id=session["user_id"]).first_or_404()
+        rec.is_active = False
+        db.session.commit()
+        flash("Recurring transaction paused.", "success")
+        return redirect(url_for("recurring"))
+
+    @app.route("/recurring/<int:rec_id>/resume", methods=["POST"])
+    @login_required
+    def resume_recurring(rec_id: int):
+        rec = RecurringTransaction.query.filter_by(id=rec_id, user_id=session["user_id"]).first_or_404()
+        rec.is_active = True
+        db.session.commit()
+        flash("Recurring transaction resumed.", "success")
+        return redirect(url_for("recurring"))
+
+    @app.route("/recurring/<int:rec_id>/delete", methods=["POST"])
+    @login_required
+    def delete_recurring(rec_id: int):
+        rec = RecurringTransaction.query.filter_by(id=rec_id, user_id=session["user_id"]).first_or_404()
+        db.session.delete(rec)
+        db.session.commit()
+        flash("Recurring transaction deleted.", "success")
+        return redirect(url_for("recurring"))
+
+    @app.route("/categories", methods=["GET", "POST"])
+    @login_required
+    def categories():
+        user = current_user()
+        if request.method == "POST":
+            name = request.form.get("name", "").strip()[:80]
+            if not name:
+                flash("Category name is required.", "danger")
+                return redirect(url_for("categories"))
+            kind = request.form.get("kind", "expense")
+            if kind not in ("income", "expense"):
+                flash("Invalid category type.", "danger")
+                return redirect(url_for("categories"))
+            existing = Category.query.filter_by(user_id=user.id, name=name).first()
+            if existing:
+                flash("You already have a category with this name.", "danger")
+                return redirect(url_for("categories"))
+            color = request.form.get("color", "#3ee0b0")
+            if not valid_color(color):
+                flash("Choose a valid six-digit color.", "danger")
+                return redirect(url_for("categories"))
+            db.session.add(
+                Category(
+                    user_id=user.id,
+                    name=name,
+                    kind=kind,
+                    icon=request.form.get("icon", "bi-tag")[:40],
+                    color=color,
+                )
+            )
+            db.session.commit()
+            flash("Category created.", "success")
+            return redirect(url_for("categories"))
+        default_cats = Category.query.filter_by(user_id=None).order_by(Category.kind, Category.name).all()
+        user_cats = Category.query.filter_by(user_id=user.id).order_by(Category.kind, Category.name).all()
+        return render_template("categories.html", default_cats=default_cats, user_cats=user_cats)
+
+    @app.route("/categories/<int:cat_id>/edit", methods=["POST"])
+    @login_required
+    def edit_category(cat_id: int):
+        cat = Category.query.filter_by(id=cat_id, user_id=session["user_id"]).first_or_404()
+        name = request.form.get("name", "").strip()[:80]
+        if not name:
+            flash("Category name is required.", "danger")
+            return redirect(url_for("categories"))
+        if name != cat.name:
+            existing = Category.query.filter_by(user_id=session["user_id"], name=name).first()
+            if existing:
+                flash("You already have a category with this name.", "danger")
+                return redirect(url_for("categories"))
+        color = request.form.get("color", cat.color)
+        if not valid_color(color):
+            flash("Choose a valid six-digit color.", "danger")
+            return redirect(url_for("categories"))
+        cat.name = name
+        cat.icon = request.form.get("icon", cat.icon)[:40]
+        cat.color = color
+        db.session.commit()
+        flash("Category updated.", "success")
+        return redirect(url_for("categories"))
+
+    @app.route("/categories/<int:cat_id>/delete", methods=["POST"])
+    @login_required
+    def delete_category(cat_id: int):
+        cat = Category.query.filter_by(id=cat_id, user_id=session["user_id"]).first_or_404()
+        if Transaction.query.filter_by(category_id=cat_id).first():
+            flash("Cannot delete category with transactions. Move or delete transactions first.", "danger")
+            return redirect(url_for("categories"))
+        db.session.delete(cat)
+        db.session.commit()
+        flash("Category deleted.", "success")
+        return redirect(url_for("categories"))
+
+    @app.route("/transfers", methods=["GET", "POST"])
+    @login_required
+    def transfers():
+        user = current_user()
+        if request.method == "POST":
+            try:
+                amount = float(request.form["amount"])
+            except (ValueError, KeyError):
+                flash("Invalid amount.", "danger")
+                return redirect(url_for("transfers"))
+            if not math.isfinite(amount) or amount <= 0:
+                flash("Amount must be greater than 0.", "danger")
+                return redirect(url_for("transfers"))
+            from_method = request.form.get("from_method", "Cash")[:40]
+            to_method = request.form.get("to_method", "UPI")[:40]
+            if from_method not in {"Cash", "UPI", "Card", "Bank", "Net Banking", "Wallet"} or to_method not in {"Cash", "UPI", "Card", "Bank", "Net Banking", "Wallet"}:
+                flash("Choose a supported payment method.", "danger")
+                return redirect(url_for("transfers"))
+            if from_method == to_method:
+                flash("From and to payment methods must be different.", "danger")
+                return redirect(url_for("transfers"))
+            try:
+                txn_date = datetime.strptime(request.form.get("txn_date") or date.today().isoformat(), "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                flash("Invalid date format.", "danger")
+                return redirect(url_for("transfers"))
+            db.session.add(
+                Transfer(
+                    user_id=user.id,
+                    from_method=from_method,
+                    to_method=to_method,
+                    amount=amount,
+                    txn_date=txn_date,
+                    note=request.form.get("note", "").strip()[:255],
+                )
+            )
+            db.session.commit()
+            flash("Transfer recorded.", "success")
+            return redirect(url_for("transfers"))
+        transfers = Transfer.query.filter_by(user_id=user.id).order_by(Transfer.txn_date.desc(), Transfer.id.desc()).limit(20).all()
+        balances = {}
+        default_methods = ["Cash", "UPI", "Card", "Bank", "Net Banking", "Wallet"]
+        for method in default_methods:
+            balance = sum(t.amount for t in Transaction.query.filter_by(user_id=user.id, payment_method=method, kind="income").all())
+            balance -= sum(t.amount for t in Transaction.query.filter_by(user_id=user.id, payment_method=method, kind="expense").all())
+            balance += sum(t.amount for t in Transfer.query.filter_by(user_id=user.id, to_method=method).all())
+            balance -= sum(t.amount for t in Transfer.query.filter_by(user_id=user.id, from_method=method).all())
+            if balance != 0:
+                balances[method] = balance
+        return render_template("transfers.html", transfers=transfers, balances=balances, default_methods=default_methods)
+
+    @app.route("/transfers/<int:transfer_id>/delete", methods=["POST"])
+    @login_required
+    def delete_transfer(transfer_id: int):
+        transfer = Transfer.query.filter_by(id=transfer_id, user_id=session["user_id"]).first_or_404()
+        db.session.delete(transfer)
+        db.session.commit()
+        flash("Transfer deleted.", "success")
+        return redirect(url_for("transfers"))
+
+    @app.errorhandler(404)
+    def not_found(e):
+        return render_template("404.html"), 404
+
+    @app.errorhandler(500)
+    def server_error(e):
+        return render_template("500.html"), 500
 
 
 def build_insights(user, expense, prev_expense, cat_rows, budget_cards):
@@ -576,7 +1399,7 @@ def build_insights(user, expense, prev_expense, cat_rows, budget_cards):
 
 
 def seed_demo_data(user: User) -> None:
-    cats = {c.name: c for c in Category.query.all()}
+    cats = {c.name: c for c in Category.query.filter_by(user_id=None).all()}
     today = date.today()
     samples = [
         ("Salary", "income", user.monthly_income or 45000, today.replace(day=1), "Company payroll", "Salary", "Bank"),

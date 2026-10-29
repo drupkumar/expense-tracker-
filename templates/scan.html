@@ -39,6 +39,7 @@
       <span class="chip" id="confidenceChip">Ready</span>
     </div>
     <form class="stack" method="post" action="{{ url_for('create_transaction') }}" id="confirmForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
       <input type="hidden" name="source" value="scan">
       <input type="hidden" name="receipt_path" id="receiptPath">
       <input type="hidden" name="next" value="dashboard">

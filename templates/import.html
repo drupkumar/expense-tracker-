@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Import transactions{% endblock %}
+{% block content %}
+<header class="page-head"><div><p class="eyebrow">Bring your ledger</p><h1>Import transactions from CSV.</h1><p class="lede">Choose a file, preview its columns, then map the date and amount fields.</p></div></header>
+<article class="glass slim">
+  <form method="post" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>CSV file<input type="file" name="file" accept=".csv,text/csv" required></label>
+    {% if headers %}
+      <h3>Map CSV columns</h3>
+      {% for field, label in [('date','Date'),('amount','Amount'),('type','Type (income/expense)'),('category','Category'),('merchant','Merchant'),('payment','Payment method'),('note','Note')] %}
+      <label>{{ label }}
+        <select name="{{ field }}" {{ 'required' if field in ['date','amount'] }}><option value="">— skip —</option>{% for header in headers %}<option value="{{ header }}" {{ 'selected' if mappings and mappings.get(field)==header }}>{{ header }}</option>{% endfor %}</select>
+      </label>
+      {% endfor %}
+      <input type="hidden" name="confirm" value="yes">
+      <h3>Preview</h3><div class="table-wrap"><table class="data"><thead><tr>{% for header in headers %}<th>{{ header }}</th>{% endfor %}</tr></thead><tbody>{% for row in sample %}<tr>{% for header in headers %}<td>{{ row.get(header,'') }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+      <p class="muted">Select the same CSV file again when you confirm. Rows already imported are skipped.</p>
+      <button class="btn-primary" type="submit">Import mapped rows</button>
+    {% else %}<button class="btn-primary" type="submit">Preview columns</button>{% endif %}
+  </form>
+</article>
+{% endblock %}

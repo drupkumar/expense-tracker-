@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 AMOUNT_PATTERNS = [
+    re.compile(r"(?:debited|sent|you\s*paid|transaction\s*amount)\s*[:\-]?\s*(?:inr|rs\.?)?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)", re.I),
     re.compile(r"(?:grand\s*total|amount\s*paid|total\s*paid|net\s*paid|paid)\s*[:\-]?\s*(?:inr|rs\.?|₹)?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)", re.I),
     re.compile(r"(?:total|amount)\s*[:\-]?\s*(?:inr|rs\.?|₹)?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)", re.I),
     re.compile(r"(?:₹|rs\.?|inr)\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)", re.I),
@@ -60,6 +61,12 @@ def _parse_date(raw: str) -> str | None:
 
 def infer_category(text: str) -> str:
     lowered = text.lower()
+    if any(app in lowered for app in ("instamart", "jiomart", "dmart", "bigbasket")):
+        return "Groceries"
+    if any(app in lowered for app in ("eatclub", "eatsure", "faasos", "behrouz")):
+        return "Food"
+    if any(app in lowered for app in ("nykaa", "tatacliq")):
+        return "Shopping"
     scores: dict[str, int] = {}
     for category, words in CATEGORY_KEYWORDS.items():
         scores[category] = sum(1 for word in words if word in lowered)
@@ -108,7 +115,10 @@ def parse_receipt_text(text: str) -> dict[str, Any]:
 
     merchant = extract_merchant(compact)
     category = infer_category(compact + " " + merchant)
-    payment = "UPI" if re.search(r"\bupi\b|gpay|google pay|phonepe|paytm", compact, re.I) else "Card" if re.search(r"card|visa|mastercard", compact, re.I) else "Cash"
+    payment = "UPI" if re.search(r"\bupi\b|gpay|google pay|phonepe|paytm|bhim|cred|amazon pay|mobikwik", compact, re.I) else "Card" if re.search(r"card|visa|mastercard", compact, re.I) else "Cash"
+    confidence = 0.9 if amount and re.search(r"total|paid|debited|sent", compact, re.I) else 0.65 if amount else 0.25
+    if merchant == "Scanned merchant":
+        confidence -= 0.15
 
     return {
         "amount": amount or 0,
@@ -118,4 +128,5 @@ def parse_receipt_text(text: str) -> dict[str, Any]:
         "payment_method": payment,
         "note": f"Imported from receipt - {merchant}",
         "raw_text": compact[:4000],
+        "confidence": round(max(0, min(1, confidence)), 2),
     }

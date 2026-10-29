@@ -1,19 +1,19 @@
 {% set txn = txn if txn is defined else None %}
 <div class="two">
   <label>Type
-    <select name="kind" required id="kindSelect">
+    <select name="kind" required>
       <option value="expense" {{ 'selected' if not txn or txn.kind == 'expense' }}>Expense</option>
       <option value="income" {{ 'selected' if txn and txn.kind == 'income' }}>Income</option>
     </select>
   </label>
   <label>Amount (₹)
-    <input type="number" step="0.01" min="0.01" name="amount" required value="{{ txn.amount if txn else '' }}" id="amountInput" placeholder="0.00">
+    <input type="number" step="0.01" min="0.01" name="amount" required value="{{ txn.amount if txn else '' }}">
   </label>
 </div>
 <label>Category
-  <select name="category_id" required id="categorySelect">
+  <select name="category_id" required>
     {% for c in categories %}
-    <option value="{{ c.id }}" data-kind="{{ c.kind }}" {{ 'selected' if txn and txn.category_id == c.id }}>{{ c.name }}</option>
+    <option value="{{ c.id }}" {{ 'selected' if txn and txn.category_id == c.id }}>{{ c.name }} ({{ c.kind }})</option>
     {% endfor %}
   </select>
 </label>
@@ -24,17 +24,14 @@
   <label>Payment
     <select name="payment_method">
       {% for m in ['UPI','Card','Cash','Net Banking','Wallet','Bank'] %}
-      <option value="{{ m }}" {{ 'selected' if txn and txn.payment_method == m }}>{{ m }}</option>
+      <option {{ 'selected' if txn and txn.payment_method == m }}>{{ m }}</option>
       {% endfor %}
     </select>
   </label>
 </div>
-<details class="optional-fields">
-  <summary>Optional details</summary>
-  <label>Merchant / payee
-    <input name="merchant" value="{{ txn.merchant if txn else '' }}" placeholder="Swiggy, Airtel, Client…">
-  </label>
-  <label>Note
-    <input name="note" value="{{ txn.note if txn else '' }}" placeholder="What was this for?">
-  </label>
-</details>
+<label>Merchant / payee
+  <input name="merchant" value="{{ txn.merchant if txn else '' }}" placeholder="Swiggy, Airtel, Client…">
+</label>
+<label>Note
+  <input name="note" value="{{ txn.note if txn else '' }}" placeholder="What was this for?">
+</label>

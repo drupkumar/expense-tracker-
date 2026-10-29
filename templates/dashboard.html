@@ -9,6 +9,24 @@
   <a class="btn-primary" href="{{ url_for('scan') }}"><i class="bi bi-camera"></i> Scan a bill</a>
 </header>
 
+{% if over_budget %}
+<div class="flash flash-danger">
+  <i class="bi bi-exclamation-triangle-fill"></i>
+  {% for b in over_budget %}
+  {{ b.budget.category.name }} is over budget ({{ '%.0f'|format(b.pct) }}%){% if not loop.last %}, {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if near_budget %}
+<div class="flash flash-warning">
+  <i class="bi bi-info-circle-fill"></i>
+  {% for b in near_budget %}
+  {{ b.budget.category.name }} is at {{ '%.0f'|format(b.pct) }}% of budget{% if not loop.last %}, {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
 <section class="kpi-grid">
   <article class="glass kpi">
     <span>Income</span>
@@ -83,10 +101,14 @@
     {% for card in budget_cards %}
     <div class="budget-mini">
       <div class="between">
-        <span>{{ card.budget.category.name }}</span>
+        <span>{{ card.budget.category.name }}
+          {% if card.pct >= 100 %}<span class="chip danger">Over</span>
+          {% elif card.pct >= 80 %}<span class="chip warn">Near</span>
+          {% endif %}
+        </span>
         <small>{{ money(card.spent) }} / {{ money(card.budget.amount) }}</small>
       </div>
-      <div class="bar"><span style="width:{{ card.pct }}%; background:{{ card.budget.category.color }}"></span></div>
+      <div class="bar"><span class="{{ 'over' if card.pct >= 100 else '' }}" style="width:{{ card.pct }}%; background:{{ card.budget.category.color }}"></span></div>
     </div>
     {% else %}
     <p class="muted">Set category budgets to get live alerts.</p>
@@ -102,7 +124,8 @@
     trendExpense: {{ trend_expense | tojson }},
     catLabels: {{ cat_labels | tojson }},
     catColors: {{ cat_colors | tojson }},
-    catValues: {{ cat_values | tojson }}
+    catValues: {{ cat_values | tojson }},
+    forecast: {{ forecast | tojson }}
   };
 </script>
 {% endblock %}

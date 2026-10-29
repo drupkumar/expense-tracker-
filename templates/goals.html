@@ -12,6 +12,7 @@
   <article class="glass">
     <h3>New savings goal</h3>
     <form method="post" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
       <label>Goal name
         <input name="name" required placeholder="Emergency fund, Goa trip, new laptop">
       </label>
@@ -36,12 +37,14 @@
       <div class="between">
         <h3>{{ g.name }}</h3>
         <form method="post" action="{{ url_for('delete_goal', goal_id=g.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
           <button class="icon-btn danger" type="submit"><i class="bi bi-trash"></i></button>
         </form>
       </div>
       <p class="muted">{{ money(g.saved_amount) }} of {{ money(g.target_amount) }}{% if g.deadline %} · by {{ g.deadline.strftime('%d %b %Y') }}{% endif %}</p>
       <div class="bar tall"><span style="width:{{ [pct, 100] | min }}%"></span></div>
       <form class="inline" method="post" action="{{ url_for('add_to_goal', goal_id=g.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="number" min="1" name="amount" placeholder="Add ₹" required>
         <button class="btn-ghost" type="submit">Add savings</button>
       </form>

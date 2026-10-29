@@ -9,6 +9,7 @@
 </header>
 <article class="glass slim">
   <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <label>Name
       <input name="name" value="{{ user.name }}" required>
     </label>
@@ -18,13 +19,17 @@
     <label>Phone
       <input name="phone" value="{{ user.phone }}">
     </label>
+    <div class="two"><label>Currency<select name="currency">{% for code in ['INR','USD','EUR','GBP'] %}<option value="{{ code }}" {{ 'selected' if user.currency == code }}>{{ code }}</option>{% endfor %}</select></label><label>Theme<select name="theme"><option value="dark" {{ 'selected' if user.theme != 'light' }}>Dark</option><option value="light" {{ 'selected' if user.theme == 'light' }}>Light</option></select></label></div>
+    <label>Current password<input type="password" name="current_password" autocomplete="current-password" placeholder="Required to change password or delete account"></label>
     <label>Typical monthly income (₹)
       <input type="number" min="0" name="monthly_income" value="{{ user.monthly_income }}">
     </label>
     <label>New password
-      <input type="password" name="password" placeholder="Leave blank to keep current">
+      <input type="password" name="password" placeholder="Leave blank to keep current" autocomplete="new-password">
     </label>
     <button class="btn-primary" type="submit">Save profile</button>
+    <hr><p class="muted">Deleting your account permanently removes its transactions and finance records.</p>
+    <button class="btn-ghost danger-text" type="submit" name="delete_account" value="yes" onclick="return confirm('Permanently delete your account and data?')">Delete account</button>
   </form>
 </article>
 {% endblock %}
